@@ -61,7 +61,8 @@ web/tsconfig.tsbuildinfo
 api/celerybeat-schedule.bak
 
 # ===== 评测（eval）=====
-api/eval/results/
+api/eval/results/*
+!api/eval/results/README.md
 api/eval/cache/
 # 评测脚本与 fixtures 进 git，密钥文件不进、模板要进
 !.env.eval.example

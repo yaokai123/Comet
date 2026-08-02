@@ -1,6 +1,6 @@
 # Comet 离线评测（eval）
 
-用业界标准指标，**自包含、可复现**地评测 RAG 检索与记忆系统（抽取 / 去重 / 检索）。
+用业界标准指标和 RAGAS，**自包含、可复现、可审计**地评测 RAG 检索与记忆系统（抽取 / 去重 / 检索 / 生成）。
 
 > 自带语料和标注、自己写入再评测，**不依赖现有用户数据、不读 app 的模型配置表**——直接填模型 key 就能跑。
 > 不进生产镜像（`api/.dockerignore` 已排除 `eval/`），但进 git / 开源供他人复现。
@@ -13,6 +13,8 @@
 - **固定命名空间**：所有评测数据写在 `EVAL_USER_ID`（固定 UUID）名下，与真实用户隔离，可一键清理。
 - **写入到评测全闭环**：`setup` 复用 app 真实的分块/向量化/萃取链路把 fixtures 写进 ES/Neo4j（顺带也验证了写入链路），再评测。
 - **双输出**：① 数值报告（Markdown 指标表）② 明细（JSON：每题召回了啥/命中没、每段抽了啥 vs gold），看明细可定位问题、调系统策略。
+- **RAGAS 端到端评测**：对检索上下文和最终回答测 Context Precision、Context Recall、Faithfulness、Answer Relevancy 与 Factual Correctness；同时保留确定性检索指标，避免完全依赖 LLM-as-a-Judge。
+- **可审计清单**：每次 RAGAS 运行记录数据集 SHA-256、Git SHA、RAGAS 版本、生成/裁判/向量模型、逐题上下文与异常；默认关闭 RAGAS 遥测。
 
 ---
 
@@ -37,7 +39,7 @@ eval/
 │   └── dedup.py          去重 Pairwise P/R/F1
 ├── reporters.py          输出报告 + 明细
 ├── run_eval.py           ⭐ 总入口
-└── results/              报告与明细（git 忽略）
+└── results/              报告与明细（运行产物 git 忽略，留档规范进 git）
 ```
 
 ## 自带数据集场景
@@ -46,6 +48,7 @@ eval/
 
 - **RAG 检索**（仿 BEIR / NQ / HotpotQA 开放域问答）：`fixtures/corpus/` 10 篇通用百科（居里夫人、镭、诺贝尔奖、青霉素、长城、珠峰、大熊猫、光合作用、太阳系、长江），`gold/retrieval.json` 22 题，含**单跳**（答案在单篇）与**多跳**（需跨多篇，如「发现镭的科学家获了什么奖」要串起居里夫人↔诺贝尔奖）。
 - **记忆系统**(中文长对话个人陈述):`fixtures/dialogues.json` 是同一人设跨多段的个人陈述(上海产品经理、老家成都、复旦新闻系、养布偶猫团子、爱爬山摄影、学日语、喝拿铁、用 iPhone+索尼相机、妹妹林晓在成都);gold 的抽取三元组**严格使用受控词表谓词**(属于类型 / 位于 / 拥有 / 偏好 / 了解 / 使用 / 关联于…)。**项目记忆萃取流水线为中文优先**,prompts 与受控词表全中文,英文场景不在评测覆盖内(原计划接入的 LongMemEval-S 已下架,避免翻译噪声与实体名失真)。
+- **RAGAS**：`gold/ragas.json` 含 12 条中文参考答案、相关文档 ID 与题型标注，覆盖单跳、多来源与跨文档多跳。参考答案只使用仓库内语料可支持的事实。
 
 > 想换成贴合自己数据的场景，直接替换 `fixtures/` 下对应文件即可（语料文件名即 `relevant_doc_ids`）。
 
@@ -54,6 +57,8 @@ eval/
 1. 起存储：`docker compose up -d postgres elasticsearch neo4j redis`。
 2. 复制 `eval/.env.eval.example` → `eval/.env.eval`，填 embedding（必需）、chat（必需）、rerank（可选）的 key。
 3. （可选）把 `fixtures/` 的语料/对话/gold 换成你自己的，更贴合真实数据。
+
+正式测评建议额外配置 `RAGAS_JUDGE_*`，并选择与 `EVAL_CHAT_*` 不同家族的裁判模型；若不配置会回退复用生成模型。`RAGAS_EMBED_*` 同理会回退到 `EVAL_EMBED_*`。
 
 ## 运行（在 api/ 目录）
 
@@ -64,12 +69,13 @@ uv run python -m eval.run_eval --skip-setup     # 数据已写过，直接评测
 uv run python -m eval.run_eval --skip-check     # 跳过模型可用性自检
 uv run python -m eval.run_eval --only retrieval # 只跑 RAG 检索（retrieval/memory/extraction/dedup）
 uv run python -m eval.run_eval --teardown       # 跑完清理评测数据
+uv run python -m eval.run_eval --benchmark ragas --reset --sample 12 --top-k 5
 ```
 
 > 正式跑前会先做**模型可用性自检**：分别调用 embedding / chat / rerank 确认连得通（embedding 还会校验维度是否与 ES 索引一致），不通的必需模型直接中止、rerank 不通则自动跳过其对比列，避免灌了一半数据才发现 key/url 写错。
 > 全程带**进度日志**（写入第几篇语料 / 第几段对话萃取、评测第几题），方便看卡在哪一步。
 
-结果在 `eval/results/`：`report-时间.md`（指标表）+ `details-时间.json`（逐条明细）。
+普通结果在 `eval/results/`。RAGAS 结果位于 `eval/results/ragas/<UTC-run-id>/`，包含 `manifest.json`、`samples.jsonl`、`summary.json` 与 `report.md`。只有 `metric_error_count = 0` 的完整运行才适合用于对外指标声明。
 
 ## 指标
 
@@ -79,7 +85,8 @@ uv run python -m eval.run_eval --teardown       # 跑完清理评测数据
 | 记忆检索 | Recall@k、Precision@k、MRR、nDCG@k |
 | 三元组抽取 | 实体级 / 三元组级 Precision、Recall、F1 |
 | 实体去重 | Pairwise Precision、Recall、F1 |
+| RAGAS 端到端 | Context Precision/Recall、Faithfulness、Answer Relevancy、Factual Correctness |
 
 ## 诚实声明
 
-均为**小规模自建 gold 集**的离线自测，非大规模公开 benchmark。简历/汇报请如实标注样本规模与评测方式。
+均为**小规模自建 gold 集**的离线自测，非大规模公开 benchmark。RAGAS 的 LLM-as-a-Judge 分数会受裁判模型、提示词和版本影响，不能与其他配置下的分数直接横向比较。简历/汇报请同时披露样本规模、RAGAS 版本、生成模型、裁判模型、top-k 与数据集哈希。

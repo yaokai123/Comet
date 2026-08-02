@@ -123,9 +123,9 @@ async def _run_fixtures(args, embed, chat, rerank) -> None:
 
 
 async def _run_benchmark(args, embed, chat, rerank) -> None:
-    """①.5 公共评测基准入口。"""
+    """①.5 专业评测基准入口。"""
     name = args.benchmark
-    targets = ["cmteb-t2", "hotpotqa"] if name == "all" else [name]
+    targets = ["cmteb-t2", "hotpotqa", "ragas"] if name == "all" else [name]
     for bm in targets:
         print(f"\n========== ①.5 benchmark: {bm} ==========")
         if bm == "cmteb-t2":
@@ -146,6 +146,23 @@ async def _run_benchmark(args, embed, chat, rerank) -> None:
                 seed=args.seed,
                 verifier_client_factory=eval_config.verifier_client,
             )
+        elif bm == "ragas":
+            from eval.benchmarks.ragas_rag import run_benchmark
+            from eval.pipeline.setup import ingest_corpus
+            if args.reset and not args.skip_setup:
+                print("[reset] 清空旧评测数据（ES + Neo4j）…")
+                await teardown()
+            if not args.skip_setup:
+                print("[setup] 写入 RAGAS 评测语料…")
+                await ingest_corpus(embed)
+            await run_benchmark(
+                embed, chat, rerank,
+                sample=args.sample,
+                top_k=args.top_k,
+            )
+            if args.teardown:
+                print("[teardown] 清理评测数据…")
+                await teardown()
         else:
             print(f"  未知 benchmark: {bm}")
 
@@ -185,8 +202,8 @@ def main() -> None:
     # ①.5 公共基准开关
     p.add_argument(
         "--benchmark",
-        choices=["cmteb-t2", "hotpotqa", "all"],
-        help="跑 ①.5 公共评测基准(指定后忽略 --only 等 L1 选项)",
+        choices=["cmteb-t2", "hotpotqa", "ragas", "all"],
+        help="跑 ①.5 专业评测基准(指定后忽略 --only 等 L1 选项)",
     )
     # cmteb-t2 控制
     p.add_argument("--corpus-limit", type=int, default=1000,
@@ -201,6 +218,8 @@ def main() -> None:
     p.add_argument("--verifier", choices=["none", "same", "cross"], default="none",
                    help="[hotpotqa] Verifier 配置（等 ② Verifier Loop 完成后启用）")
     p.add_argument("--seed", type=int, default=42, help="[hotpotqa] 采样种子")
+    p.add_argument("--top-k", type=int, default=5,
+                   help="[ragas] 送入答案生成与裁判的上下文数量（默认 5）")
 
     asyncio.run(_run(p.parse_args()))
 

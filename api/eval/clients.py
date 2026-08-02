@@ -34,6 +34,63 @@ def _normalize(scores: dict[str, float]) -> dict[str, float]:
     return {k: (v - lo) / (hi - lo) for k, v in scores.items()}
 
 
+async def retrieve_hybrid_contexts(
+    embed_client, uid: str, query: str, top_k: int = 5,
+    wv: float = 0.6, wb: float = 0.4, rerank_client=None,
+) -> list[dict]:
+    """复刻生产 hybrid_search，并返回 RAGAS 所需的最终父块上下文。"""
+    recall = 20
+    es = get_es()
+    qv = await embed_client.embed_one(query)
+    filters = _base_filter(uid)
+    knn = await es.search(index=CHUNKS_INDEX, body={
+        "size": recall, "query": {"bool": {"filter": filters}},
+        "knn": {"field": "vector", "query_vector": qv, "k": recall,
+                "num_candidates": recall * 5,
+                "filter": {"bool": {"filter": filters}}},
+    })
+    bm = await es.search(index=CHUNKS_INDEX, body={
+        "size": recall,
+        "query": {"bool": {"must": [{"match": {"content": query}}],
+                           "filter": filters}},
+    })
+    vs = {h["_id"]: h["_score"] for h in knn["hits"]["hits"]}
+    bs = {h["_id"]: h["_score"] for h in bm["hits"]["hits"]}
+    hits = {h["_id"]: h for h in knn["hits"]["hits"] + bm["hits"]["hits"]}
+    vn, bn = _normalize(vs), _normalize(bs)
+    fused = {cid: wv * vn.get(cid, 0.0) + wb * bn.get(cid, 0.0) for cid in hits}
+    candidate_ids = sorted(fused, key=fused.get, reverse=True)[:max(top_k, recall)]
+    if rerank_client and candidate_ids:
+        pairs = await rerank_client.rerank(
+            query, [hits[cid]["_source"].get("content", "") for cid in candidate_ids],
+            top_n=top_k,
+        )
+        candidate_ids = [candidate_ids[index] for index, _ in pairs
+                         if 0 <= index < len(candidate_ids)]
+    results: list[dict] = []
+    for cid in candidate_ids[:top_k]:
+        source = hits[cid]["_source"]
+        content = source.get("content", "")
+        parent_id = source.get("parent_id")
+        if parent_id:
+            parent = await es.search(index=CHUNKS_INDEX, body={
+                "size": 1,
+                "query": {"bool": {"filter": [
+                    {"term": {"user_id": uid}}, {"term": {"chunk_id": parent_id}},
+                ]}},
+            })
+            parent_hits = parent["hits"]["hits"]
+            if parent_hits:
+                content = parent_hits[0]["_source"].get("content", content)
+        results.append({
+            "chunk_id": cid,
+            "source_id": source.get("source_id"),
+            "content": content,
+            "score": round(fused.get(cid, 0.0), 8),
+        })
+    return results
+
+
 async def retrieve_vector(embed_client, uid: str, query: str, recall: int = 20) -> list[str]:
     es = get_es()
     qv = await embed_client.embed_one(query)

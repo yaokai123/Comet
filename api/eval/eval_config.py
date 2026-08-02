@@ -54,3 +54,21 @@ def verifier_client() -> LLMClient | None:
     - --verifier=same 时不使用,本函数不调
     """
     return _build("EVAL_VERIFIER")
+
+
+def ragas_model_config(kind: str) -> dict[str, str]:
+    """读取独立 RAGAS judge/embedding 配置，未填时回退到现有评测模型。
+
+    kind 为 JUDGE 或 EMBED。正式对外报告建议 judge 与生成模型使用不同模型家族，
+    以降低 self-preference bias；本地冒烟测试可直接复用 EVAL_CHAT/EVAL_EMBED。
+    """
+    fallback = "EVAL_CHAT" if kind == "JUDGE" else "EVAL_EMBED"
+    prefix = f"RAGAS_{kind}"
+    values = {
+        "base_url": os.getenv(f"{prefix}_BASE_URL") or os.getenv(f"{fallback}_BASE_URL"),
+        "api_key": os.getenv(f"{prefix}_KEY") or os.getenv(f"{fallback}_KEY"),
+        "model": os.getenv(f"{prefix}_MODEL") or os.getenv(f"{fallback}_MODEL"),
+    }
+    if not all(values.values()):
+        raise RuntimeError(f"缺少 {prefix}_* 配置，且没有可用的 {fallback}_* 回退配置")
+    return values
