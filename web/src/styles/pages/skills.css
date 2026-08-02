@@ -1,0 +1,177 @@
+/* ── 技能（Skills）页 ── */
+.skill-page {
+  padding-top: 4px;
+}
+/* Hero 条：流光渐变（青蓝色系，与角色卡区分） */
+.skill-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 26px 28px;
+  margin-bottom: 22px;
+  background: linear-gradient(120deg, #0ea5e9 0%, #6366f1 100%);
+  box-shadow: 0 18px 40px -18px rgba(14, 165, 233, 0.6);
+}
+.skill-hero-bg {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 12% 20%, rgba(255, 255, 255, 0.35), transparent 40%),
+    radial-gradient(circle at 88% 80%, rgba(255, 255, 255, 0.22), transparent 45%);
+  pointer-events: none;
+}
+.skill-hero-content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #fff;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.skill-hero-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 1px;
+}
+.skill-hero-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* 画廊网格 */
+.skill-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+/* 新建卡（幽灵卡） */
+.skill-ghost-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 150px;
+  border: 1.5px dashed #d0d5dd;
+  border-radius: 14px;
+  background: transparent;
+  color: #98a2b3;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+.skill-ghost-card:hover {
+  border-color: #5cc0ec;
+  color: #0ea5e9;
+  background: #f0f9ff;
+}
+.skill-ghost-plus {
+  font-size: 26px;
+  transition: transform 0.25s ease;
+}
+.skill-ghost-card:hover .skill-ghost-plus {
+  transform: scale(1.18);
+}
+
+/* 技能卡 */
+.skill-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 150px;
+  padding: 16px 18px;
+  border: 1px solid #eceef2;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 2px 10px -6px rgba(16, 24, 40, 0.12);
+  transition: all 0.22s ease;
+}
+.skill-card:hover {
+  box-shadow: 0 14px 30px -14px rgba(14, 165, 233, 0.4);
+  transform: translateY(-2px);
+}
+.skill-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.skill-card-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+.skill-card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #171719;
+}
+.skill-card-desc {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #667085;
+  line-height: 1.6;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.skill-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.skill-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  border-top: 1px solid #f3f4f6;
+  padding-top: 8px;
+}
+.skill-card-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.skill-card-toggle-label {
+  font-size: 12px;
+  color: #98a2b3;
+}
+
+/* 技能编辑弹窗字段 */
+.skill-field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #344054;
+  margin-bottom: 6px;
+}
+.skill-field-tip {
+  font-weight: 400;
+  color: #98a2b3;
+  margin-left: 8px;
+  font-size: 12px;
+}
+.skill-icon-pick {
+  width: 38px;
+  height: 38px;
+  font-size: 20px;
+  border: 1px solid #e4e7ec;
+  border-radius: 9px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.skill-icon-pick:hover {
+  border-color: #7c9cff;
+}
+.skill-icon-pick.active {
+  border-color: #155eef;
+  background: #eef4ff;
+}
+

@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07100d" />
+    <meta
+      name="description"
+      content="Comet（彗记）——让知识持续生长、让 AI 真正记住你的个人知识与记忆系统。"
+    />
+    <meta property="og:title" content="Comet · 个人 AI 知识与记忆系统" />
+    <meta
+      property="og:description"
+      content="收集、理解、连接与回忆。一个可追溯、可进化的个人 AI 工作台。"
+    />
+    <title>Comet · 让知识成为记忆</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='28' cy='28' r='17' fill='%23b9ff48'/%3E%3Cpath d='M39 39 56 56' stroke='%23b9ff48' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <script>document.documentElement.classList.add('js')</script>
+    <link rel="stylesheet" href="./assets/home.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="cursor-glow" aria-hidden="true"></div>
+
+    <header class="site-header" data-header>
+      <a class="brand" href="#top" aria-label="Comet 首页">
+        <span class="brand-mark" aria-hidden="true">
+          <span></span>
+        </span>
+        <span>COMET</span>
+      </a>
+
+      <nav class="desktop-nav" aria-label="主导航">
+        <a href="#vision">理念</a>
+        <a href="#features">能力</a>
+        <a href="#architecture">架构</a>
+        <a href="#creator">作者</a>
+      </nav>
+
+      <a
+        class="header-link"
+        href="https://github.com/yaokai123"
+        target="_blank"
+        rel="noreferrer"
+      >
+        GitHub
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 11.5 11.5 4.5M6 4.5h5.5V10" /></svg>
+      </a>
+
+      <button class="menu-button" type="button" aria-label="打开菜单" aria-expanded="false">
+        <span></span><span></span>
+      </button>
+    </header>
+
+    <div class="mobile-menu" aria-hidden="true">
+      <nav aria-label="移动端导航">
+        <a href="#vision">01 / 理念</a>
+        <a href="#features">02 / 能力</a>
+        <a href="#architecture">03 / 架构</a>
+        <a href="#creator">04 / 作者</a>
+      </nav>
+    </div>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="orbit orbit-one" aria-hidden="true"></div>
+        <div class="orbit orbit-two" aria-hidden="true"></div>
+        <div class="hero-ambient" aria-hidden="true"></div>
+
+        <div class="hero-copy reveal">
+          <div class="eyebrow">
+            <span class="status-dot"></span>
+            PERSONAL AI · KNOWLEDGE & MEMORY
+          </div>
+          <h1>
+            不只是回答问题，<br />
+            <span>而是真正记住你。</span>
+          </h1>
+          <p class="hero-lead">
+            Comet 将散落的文档、网页、图片与对话，沉淀为可检索、可追溯、会持续生长的个人知识网络。
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#features">
+              探索 Comet
+              <span aria-hidden="true">↘</span>
+            </a>
+            <button class="button button-ghost copy-command" type="button" data-copy="git clone git@github.com:lm041520/Comet.git">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-2M15 4h5v5M10 14 20 4" /></svg>
+              <span>复制克隆命令</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="hero-visual reveal" data-delay="120" aria-label="Comet 产品概念界面">
+          <div class="visual-label label-a"><span></span>Context recalled</div>
+          <div class="visual-label label-b"><span></span>Source verified</div>
+          <div class="app-window">
+            <div class="window-bar">
+              <div class="window-dots"><i></i><i></i><i></i></div>
+              <span>COMET / MEMORY SPACE</span>
+              <div class="window-signal"><i></i><i></i><i></i></div>
+            </div>
+            <div class="window-body">
+              <aside class="mock-sidebar">
+                <div class="mini-logo">C</div>
+                <span class="mock-nav active"></span>
+                <span class="mock-nav"></span>
+                <span class="mock-nav"></span>
+                <span class="mock-nav"></span>
+                <span class="mock-nav bottom"></span>
+              </aside>
+              <div class="mock-main">
+                <div class="mock-topline"><span>MEMORY / 042</span><i></i></div>
+                <div class="memory-heading">
+                  <span class="memory-kicker">ACTIVE RECALL</span>
+                  <strong>知识不是被存下，<br />而是被重新连接。</strong>
+                </div>
+                <div class="knowledge-map" aria-hidden="true">
+                  <svg viewBox="0 0 520 270" role="img">
+                    <g class="map-lines">
+                      <path d="M92 135 192 74 276 130 368 58 438 126" />
+                      <path d="M92 135 184 204 276 130 350 213 438 126" />
+                      <path d="M192 74 184 204M368 58 350 213" />
+                      <path class="soft" d="M92 135 276 130M276 130 438 126" />
+                    </g>
+                    <g class="map-nodes">
+                      <circle cx="92" cy="135" r="9" />
+                      <circle cx="192" cy="74" r="6" />
+                      <circle cx="184" cy="204" r="6" />
+                      <circle class="core" cx="276" cy="130" r="13" />
+                      <circle cx="368" cy="58" r="7" />
+                      <circle cx="350" cy="213" r="7" />
+                      <circle cx="438" cy="126" r="9" />
+                    </g>
+                    <g class="map-labels">
+                      <text x="64" y="164">SOURCE</text>
+                      <text x="162" y="51">CONTEXT</text>
+                      <text x="150" y="232">EVENT</text>
+                      <text x="252" y="161">YOU</text>
+                      <text x="344" y="34">INSIGHT</text>
+                      <text x="324" y="241">MEMORY</text>
+                      <text x="414" y="155">ANSWER</text>
+                    </g>
+                  </svg>
+                </div>
+                <div class="mock-footer">
+                  <span><i></i> 7 SOURCES CONNECTED</span>
+                  <span>CONFIDENCE 96%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-meta">
+          <span>SCROLL TO DISCOVER</span>
+          <i></i>
+          <span>V 0.0.5</span>
+        </div>
+      </section>
+
+      <section class="statement section-pad" id="vision">
+        <div class="section-index reveal">01 / WHY COMET</div>
+        <div class="statement-grid">
+          <h2 class="reveal">你的信息很多。<br />真正属于你的<br /><em>知识</em>却很少。</h2>
+          <div class="statement-copy reveal" data-delay="100">
+            <p>
+              收藏夹越堆越满，文档散落各处，对话结束后洞察也随之消失。传统工具保存内容，Comet 更关心内容之间的关系。
+            </p>
+            <p>
+              它为每个答案保留来源，为每段记忆记录来处，并在需要的时刻主动找回与你有关的上下文。
+            </p>
+            <div class="principle">
+              <span>OUR PRINCIPLE</span>
+              <strong>Collect less.<br />Connect more.</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="capabilities section-pad" id="features">
+        <div class="section-head reveal">
+          <div>
+            <div class="section-index">02 / CAPABILITIES</div>
+            <h2>一套系统，完成知识的<br /><span>完整生命循环。</span></h2>
+          </div>
+          <p>从捕获到理解，从记忆到行动。每一步都可见、可控、可追溯。</p>
+        </div>
+
+        <div class="bento-grid">
+          <article class="feature-card feature-large reveal">
+            <div class="card-number">01</div>
+            <div class="card-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-10Z" /><path d="m9 13 2 2 4-5" /></svg>
+            </div>
+            <div class="card-copy">
+              <span>KNOWLEDGE BASE</span>
+              <h3>让所有资料，<br />都能被准确找到。</h3>
+              <p>支持文档、网页与图片。向量 + BM25 混合检索，让每个结论都带着可核验的来源。</p>
+            </div>
+            <div class="document-stack" aria-hidden="true">
+              <div class="doc doc-back"></div>
+              <div class="doc doc-mid"></div>
+              <div class="doc doc-front">
+                <span></span><span></span><span></span><span class="short"></span>
+                <i>RAG</i>
+              </div>
+            </div>
+          </article>
+
+          <article class="feature-card reveal" data-delay="60">
+            <div class="card-number">02</div>
+            <div class="card-icon small">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><circle cx="5" cy="7" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="18" cy="18" r="2" /><path d="m6.8 8 3 2.3M14.5 10l3-2.6M14.6 14l2 2.2" /></svg>
+            </div>
+            <div class="card-copy">
+              <span>LONG-TERM MEMORY</span>
+              <h3>从对话中，<br />生长出你的记忆图谱。</h3>
+              <p>自动萃取事件、偏好与实体关系，保留四层溯源。</p>
+            </div>
+            <div class="mini-graph" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          </article>
+
+          <article class="feature-card reveal" data-delay="120">
+            <div class="card-number">03</div>
+            <div class="card-icon small">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" /><circle cx="12" cy="12" r="3" /></svg>
+            </div>
+            <div class="card-copy">
+              <span>AGENT ORCHESTRATION</span>
+              <h3>把复杂问题，<br />交给会规划的 Agent。</h3>
+              <p>自主组合知识、记忆与联网工具，完成多阶段深度研究。</p>
+            </div>
+            <div class="agent-pulse" aria-hidden="true"><i></i><i></i><i></i></div>
+          </article>
+
+          <article class="feature-card feature-wide reveal">
+            <div class="card-number">04</div>
+            <div class="quality-visual" aria-hidden="true">
+              <div class="quality-ring"><span>95<small>%</small></span></div>
+              <div class="quality-bars"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="card-copy">
+              <span>VERIFIER LOOP</span>
+              <h3>AI 的答案，也需要<br />一套质量闭环。</h3>
+              <p>六维 Rubric 自动审稿，不合格内容自主修订；完整 Trace 让每次调用与成本都有迹可循。</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="architecture section-pad" id="architecture">
+        <div class="section-head light reveal">
+          <div>
+            <div class="section-index">03 / HOW IT WORKS</div>
+            <h2>从信息到洞察，<br /><span>每一步都清晰。</span></h2>
+          </div>
+          <p>模块化、可替换的技术架构，让个人数据始终掌握在自己手中。</p>
+        </div>
+
+        <div class="flow reveal">
+          <article>
+            <span class="flow-id">01</span>
+            <strong>捕获</strong>
+            <small>CAPTURE</small>
+            <p>文档 · 网页 · 图片 · 对话</p>
+          </article>
+          <i class="flow-arrow">→</i>
+          <article>
+            <span class="flow-id">02</span>
+            <strong>理解</strong>
+            <small>UNDERSTAND</small>
+            <p>解析 · 分块 · 向量化</p>
+          </article>
+          <i class="flow-arrow">→</i>
+          <article>
+            <span class="flow-id">03</span>
+            <strong>连接</strong>
+            <small>CONNECT</small>
+            <p>实体 · 事件 · 知识图谱</p>
+          </article>
+          <i class="flow-arrow">→</i>
+          <article class="accent">
+            <span class="flow-id">04</span>
+            <strong>行动</strong>
+            <small>ACT</small>
+            <p>问答 · 研究 · 主动任务</p>
+          </article>
+        </div>
+
+        <div class="stack reveal">
+          <div class="stack-label">BUILT WITH</div>
+          <div class="stack-items">
+            <span>React</span><i></i><span>FastAPI</span><i></i><span>PostgreSQL</span><i></i><span>Elasticsearch</span><i></i><span>Neo4j</span><i></i><span>Redis</span><i></i><span>LangChain</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="creator section-pad" id="creator">
+        <div class="creator-card reveal">
+          <div class="creator-avatar-wrap">
+            <div class="creator-monogram" role="img" aria-label="yaokai123 的字母头像">
+              <span>YK</span>
+              <i></i>
+            </div>
+            <span>AVAILABLE ON GITHUB</span>
+          </div>
+          <div class="creator-copy">
+            <div class="section-index">04 / THE CREATOR</div>
+            <h2>你好，我是 <span>yaokai123</span>。</h2>
+            <p>
+              我关注 AI Agent、个人知识系统与可验证的软件工程。Comet 是一次关于“AI 如何真正理解并长期陪伴一个人”的完整实践。
+            </p>
+            <div class="creator-topics">
+              <span>AI AGENTS</span><span>KNOWLEDGE SYSTEMS</span><span>LOCAL FIRST</span>
+            </div>
+          </div>
+          <a class="profile-link" href="https://github.com/yaokai123" target="_blank" rel="noreferrer" aria-label="访问 yaokai123 的 GitHub 主页">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9" /></svg>
+          </a>
+        </div>
+      </section>
+
+      <section class="closing">
+        <div class="closing-orbit" aria-hidden="true"></div>
+        <div class="closing-copy reveal">
+          <span>YOUR KNOWLEDGE, IN MOTION.</span>
+          <h2>开始构建，<br />属于你的第二大脑。</h2>
+          <a class="button button-light" href="https://github.com/yaokai123" target="_blank" rel="noreferrer">
+            在 GitHub 上查看
+            <span aria-hidden="true">↗</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <a class="brand footer-brand" href="#top"><span class="brand-mark"><span></span></span><span>COMET</span></a>
+      <p>个人 AI 知识库与记忆助手</p>
+      <span>© 2026 · BUILT WITH CURIOSITY</span>
+    </footer>
+
+    <div class="toast" role="status" aria-live="polite">克隆命令已复制</div>
+    <script src="./assets/home.js"></script>
+  </body>
+</html>

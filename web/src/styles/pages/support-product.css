@@ -1,0 +1,275 @@
+﻿/* Final route unification: resources, traceability and configuration pages. */
+.resource-workspace {
+  max-width: 1180px;
+}
+
+.traces-workspace .ant-card,
+.favorites-workspace .ant-card,
+.image-workspace .ant-card,
+.notify-workspace .ant-card,
+.skill-page .ant-card,
+.persona-page .ant-card {
+  border-color: var(--comet-line) !important;
+  border-radius: 8px !important;
+  background: var(--comet-surface) !important;
+  box-shadow: var(--comet-shadow) !important;
+}
+
+.traces-workspace .ant-card-head,
+.notify-workspace .ant-card-head {
+  border-bottom-color: var(--comet-line);
+  background: var(--comet-surface-muted);
+}
+
+.traces-workspace .ant-table,
+.traces-workspace .ant-table-thead > tr > th,
+.traces-workspace .ant-table-tbody > tr > td {
+  border-bottom-color: var(--comet-line) !important;
+  background: var(--comet-surface) !important;
+}
+
+.traces-workspace .ant-table-thead > tr > th {
+  color: var(--comet-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--comet-surface-muted) !important;
+}
+
+.traces-workspace .ant-timeline-item-tail {
+  border-inline-start-color: var(--comet-line);
+}
+
+.traces-workspace .ant-tag-blue,
+.traces-workspace .ant-tag-processing,
+.favorites-workspace .ant-tag-blue,
+.image-workspace .ant-tag-blue,
+.notify-workspace .ant-tag-blue {
+  border-color: #e8c983 !important;
+  background: #fff4d9 !important;
+  color: #754912 !important;
+}
+
+.favorites-workspace .ant-tabs-nav,
+.image-workspace .ant-tabs-nav {
+  margin-bottom: 16px;
+}
+
+.favorites-workspace .ant-tabs-ink-bar,
+.image-workspace .ant-tabs-ink-bar {
+  background: var(--comet-primary);
+}
+
+.favorites-workspace .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn,
+.image-workspace .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #754912;
+}
+
+.favorites-workspace .ant-list-item,
+.image-workspace .ant-list-item,
+.notify-workspace .ant-list-item {
+  border-block-end-color: var(--comet-line);
+}
+
+.image-workspace .ant-upload-drag {
+  border-color: var(--comet-line) !important;
+  border-radius: 8px !important;
+  background: var(--comet-surface) !important;
+}
+
+.image-workspace .ant-upload-drag:hover {
+  border-color: var(--comet-primary) !important;
+  background: #fff9ed !important;
+}
+
+.image-workspace .ant-upload-drag-icon .anticon {
+  color: var(--comet-primary) !important;
+}
+
+.music-workspace .music-hall {
+  border-color: var(--comet-line) !important;
+  border-radius: 8px !important;
+  background: var(--comet-surface) !important;
+  box-shadow: var(--comet-shadow);
+}
+
+.music-workspace .music-hero,
+.music-workspace .music-hall-head {
+  background: var(--comet-surface-muted) !important;
+  border-bottom-color: var(--comet-line) !important;
+}
+
+.music-workspace .album-card {
+  border-color: var(--comet-line) !important;
+  border-radius: 8px !important;
+  background: var(--comet-surface) !important;
+  box-shadow: none !important;
+}
+
+.music-workspace .album-card:hover {
+  transform: none !important;
+  border-color: var(--comet-line-strong) !important;
+}
+
+.music-workspace .album-cover,
+.music-workspace .album-mood-glow {
+  background: var(--comet-primary-soft) !important;
+}
+
+.music-workspace .album-play-disc,
+.music-workspace .music-recommend-btn {
+  background: var(--comet-primary) !important;
+}
+
+.profile-workspace .profile-card {
+  overflow: hidden;
+  border: 1px solid var(--comet-line);
+  border-radius: 8px;
+  background: var(--comet-surface);
+  box-shadow: var(--comet-shadow);
+}
+
+.profile-workspace .profile-cover {
+  background: var(--comet-primary-soft) !important;
+}
+
+.profile-workspace .profile-avatar-wrap {
+  border-color: var(--comet-surface) !important;
+  box-shadow: 0 0 0 1px var(--comet-line);
+}
+
+.profile-workspace .profile-row {
+  border-bottom-color: var(--comet-line) !important;
+}
+
+.skill-page .skill-hero,
+.persona-page .persona-hero {
+  overflow: hidden;
+  border: 1px solid var(--comet-line);
+  border-radius: 8px;
+  background: var(--comet-surface-muted) !important;
+  box-shadow: var(--comet-shadow);
+}
+
+.skill-page .skill-hero-bg,
+.persona-page .persona-hero-bg {
+  display: none;
+}
+
+.skill-page .skill-hero-title,
+.persona-page .persona-hero-title,
+.skill-page .skill-card-title,
+.persona-page .persona-card-name,
+.persona-page .scene-card-name {
+  color: var(--comet-text) !important;
+}
+
+.skill-page .skill-hero-sub,
+.persona-page .persona-hero-sub,
+.skill-page .skill-card-desc,
+.persona-page .scene-card-desc {
+  color: var(--comet-text-secondary) !important;
+}
+
+.skill-page .skill-card,
+.skill-page .skill-ghost-card,
+.persona-page .persona-card,
+.persona-page .persona-ghost-card,
+.persona-page .scene-card,
+.persona-page .pg-card {
+  border-color: var(--comet-line) !important;
+  border-radius: 8px !important;
+  background: var(--comet-surface) !important;
+  box-shadow: none !important;
+}
+
+.skill-page .skill-card:hover,
+.skill-page .skill-ghost-card:hover,
+.persona-page .persona-card:hover,
+.persona-page .persona-ghost-card:hover,
+.persona-page .scene-card:hover,
+.persona-page .pg-card:hover {
+  transform: none !important;
+  border-color: var(--comet-line-strong) !important;
+}
+
+.gc-page {
+  gap: 16px !important;
+}
+
+.gc-sider,
+.gc-main {
+  border-color: var(--comet-line) !important;
+  border-radius: 8px !important;
+  background: var(--comet-surface) !important;
+  box-shadow: var(--comet-shadow) !important;
+}
+
+.gc-list,
+.gc-header,
+.gc-input-wrap {
+  background: var(--comet-surface-muted) !important;
+  border-color: var(--comet-line) !important;
+}
+
+.gc-new-btn,
+.gc-send-btn {
+  background: var(--comet-primary) !important;
+  box-shadow: none !important;
+}
+
+.gc-conv.active,
+.gc-conv:hover {
+  background: #fff4d9 !important;
+  color: #754912 !important;
+}
+
+.gc-bubble--user {
+  border-color: #a86b19 !important;
+  background: var(--comet-primary) !important;
+  box-shadow: none !important;
+}
+
+.gc-bubble--ai,
+.gc-thinking,
+.gc-tool-area,
+.gc-input-box {
+  border-color: var(--comet-line) !important;
+  background: var(--comet-surface) !important;
+  box-shadow: none !important;
+}
+
+.gc-placeholder-icon {
+  border-color: #e5c47e !important;
+  border-radius: 8px !important;
+  background: var(--comet-primary-soft) !important;
+  color: var(--comet-primary) !important;
+}
+
+@media (max-width: 768px) {
+  .resource-workspace,
+  .operations-page {
+    max-width: none;
+  }
+
+  .gc-page {
+    gap: 0 !important;
+  }
+
+  .gc-main {
+    border-radius: 0 !important;
+    border-inline-width: 0 !important;
+  }
+
+  .profile-workspace .profile-card,
+  .music-workspace .music-hall,
+  .skill-page .skill-hero,
+  .persona-page .persona-hero {
+    border-radius: 8px;
+  }
+
+  .traces-workspace .ant-card-head,
+  .notify-workspace .ant-card-head {
+    min-height: 76px;
+    padding-inline: 14px;
+  }
+}

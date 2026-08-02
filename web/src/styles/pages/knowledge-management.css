@@ -1,0 +1,212 @@
+/* ──────────── 知识库管理 ──────────── */
+.kb-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+.kb-card {
+  position: relative;
+  padding: 18px 18px 12px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #eef0f4;
+  box-shadow: 0 6px 20px -16px rgba(16, 24, 40, 0.4);
+  border-top: 3px solid var(--kb-color, #155eef);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.kb-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px -16px rgba(16, 24, 40, 0.45);
+}
+.kb-card--clickable {
+  cursor: pointer;
+}
+.kb-card-chat {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0 2px;
+}
+.kb-card-chat-label {
+  font-size: 12.5px;
+  color: #475467;
+}
+.kb-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.kb-card-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+.kb-card-badge {
+  font-size: 11px;
+  color: var(--kb-color, #155eef);
+  background: rgba(21, 94, 239, 0.1);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.kb-card-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1d2129;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-card-desc {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #667085;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-card-stat {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: #98a2b3;
+}
+.kb-card-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  border-top: 1px solid #f2f4f7;
+  padding-top: 6px;
+}
+/* 图标/颜色选择器 */
+.kb-icon-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.kb-icon-opt {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  border-radius: 8px;
+  border: 1px solid #eef0f4;
+  cursor: pointer;
+  border: 1px solid #eef0f4;
+  padding: 0;
+  font: inherit;
+  transition: all 0.15s ease;
+}
+.kb-icon-opt--active {
+  border-color: #155eef;
+  background: #eef4ff;
+}
+.kb-color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.kb-color-opt {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 0;
+  padding: 0;
+  box-shadow: 0 0 0 2px #fff;
+  transition: transform 0.15s ease;
+}
+.kb-icon-opt:focus-visible,
+.kb-color-opt:focus-visible {
+  outline: 3px solid var(--comet-focus);
+  outline-offset: 2px;
+}
+.kb-color-opt--active {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(21, 94, 239, 0.4);
+}
+
+@media (max-width: 768px) {
+  .kb-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 知识库详情页图片网格 */
+.kb-img-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+.kb-img-card {
+  border: 1px solid #eef0f4;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.kb-img-thumb {
+  height: 130px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f6f8;
+}
+.kb-img-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  gap: 6px;
+}
+.kb-img-name {
+  font-size: 12.5px;
+  color: #475467;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 768px) {
+  .kb-img-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  }
+}
+
+/* 知识库详情页头部 + 返回按钮 */
+.kb-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.kb-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 12px 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+.kb-back-btn:hover {
+  background: #e7ebf0;
+  color: #155eef;
+  transform: translateX(-2px);
+}
+.kb-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.kb-detail-icon {
+  font-size: 30px;
+  line-height: 1;
+  flex: 0 0 auto;
+}

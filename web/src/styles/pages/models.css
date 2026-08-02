@@ -1,0 +1,158 @@
+/* ── 模型配置页：分组卡片网格 ── */
+.model-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.model-group-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.model-group-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.model-group-count {
+  margin-left: 2px;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #667085;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.model-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+@media (max-width: 720px) {
+  .model-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.model-card {
+  position: relative;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #ececf0;
+  padding: 18px 18px 10px;
+  overflow: hidden;
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s,
+    border-color 0.25s;
+}
+.model-card:hover {
+  transform: translateY(-4px);
+  border-color: transparent;
+  box-shadow: 0 14px 34px rgba(16, 24, 40, 0.12);
+}
+/* 顶部一条渐变高光 */
+.model-card-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.model-card:hover .model-card-glow {
+  opacity: 1;
+}
+
+.model-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.model-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 19px;
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.16);
+}
+.model-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.model-card-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: #1d2129;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.model-card-provider {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #98a2b3;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.model-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid #f2f4f7;
+}
+.model-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-width: 0;
+}
+.model-card-label {
+  color: #98a2b3;
+  flex-shrink: 0;
+  width: 34px;
+}
+.model-card-value {
+  color: #475467;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+.model-card-key {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  letter-spacing: -0.2px;
+}
+
+.model-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-top: 6px;
+  border-top: 1px solid #f2f4f7;
+  flex-wrap: wrap;
+}
+
+

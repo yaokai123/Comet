@@ -1,0 +1,6 @@
+FROM comet-main-api:latest
+
+RUN uv pip install --python /app/.venv/bin/python pytest==8.3.4
+
+WORKDIR /workspace
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "pytest"]

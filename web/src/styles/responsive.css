@@ -1,0 +1,296 @@
+/* ───────────────── 移动端适配（≤768px）───────────────── */
+@media (max-width: 768px) {
+  /* 手机端全局隐藏滚动条（保留滚动功能） */
+  * {
+    scrollbar-width: none !important; /* Firefox */
+    -ms-overflow-style: none !important; /* IE/Edge */
+  }
+  *::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important; /* Chrome/Safari */
+  }
+
+  /* 顶栏整体压低，给内容更多空间 */
+  .ant-layout-header {
+    height: 52px !important;
+    line-height: 52px !important;
+  }
+
+  /* 内容容器在手机上吃满宽度 */
+  .fluid-page,
+  .fluid-narrow,
+  .chat-fluid {
+    max-width: 100%;
+  }
+
+  /* 对话页：会话列表收进抽屉，对话区占满全屏（保留圆角更有质感） */
+  .chat-main {
+    border-radius: 14px;
+    min-height: 100%;
+  }
+
+  /* 对话消息与输入区在手机上减小左右留白 */
+  .chat-main .fluid-narrow,
+  .chat-main .chat-fluid {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  /* 工具调用过程展示：手机端整体收紧 + chip 副文限宽 + 详情面板预览限高 */
+  .chat-process {
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 12.5px;
+  }
+  .chat-process-progress {
+    height: 4px;
+  }
+  .chat-process-headline {
+    font-size: 12.5px;
+    min-height: 22px;
+    padding: 2px 2px;
+  }
+  .chat-process-tools {
+    gap: 5px 6px;
+  }
+  .chat-process-chip {
+    padding: 3px 9px;
+    font-size: 12.5px;
+    min-height: 26px;
+    max-width: 100%;
+  }
+  .chat-process-chip__sub {
+    max-width: 38vw;
+  }
+  /* 详情面板：缩内边距 + 限高，避免摘要 pre 撑爆屏幕 */
+  .chat-process-panel {
+    padding: 10px 12px;
+    font-size: 12.5px;
+  }
+  .chat-process-panel__head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .chat-process-panel__label {
+    width: 32px;
+    font-size: 11.5px;
+  }
+  .chat-process-panel__pre {
+    max-height: 160px;
+    font-size: 12px;
+  }
+  .chat-process-panel__md {
+    max-height: 180px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .chat-process-panel__md pre {
+    max-height: 140px;
+  }
+
+  /* 仪表盘横幅在手机上压缩留白与字号 */
+  .dash-hero {
+    padding: 22px 18px;
+  }
+  .dash-hero__title {
+    font-size: 21px;
+  }
+
+  /* 供应商链接、模型卡在手机单列 */
+  .provider-link-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* 记忆页：标题与分段切换器在手机上竖向堆叠并居中，避免被挤出屏幕 */
+  .memory-card .ant-card-head {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px 16px;
+  }
+  .memory-card .ant-card-head-wrapper {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .memory-card .ant-card-extra {
+    margin-inline-start: 0;
+    margin-top: 0;
+    width: 100%;
+  }
+  /* 分段切换器铺满整宽，四个标签等分，紧凑显示不溢出 */
+  .memory-tabs.ant-segmented {
+    width: 100%;
+    overflow: hidden;
+  }
+  .memory-tabs.ant-segmented .ant-segmented-group {
+    width: 100%;
+  }
+  .memory-tabs.ant-segmented .ant-segmented-item {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  /* 手机端:短标签(画像/社区/时间/检索/审查)+ 图标,5 等分一屏放下 */
+  .memory-tabs.ant-segmented .ant-segmented-item-label {
+    padding: 0 4px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .memory-tabs.ant-segmented .ant-segmented-item-label .anticon {
+    margin-inline-end: 3px;
+  }
+}
+
+
+/* 对话输入区：待发送的文档附件 chip */
+.chat-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 240px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: #f2f5ff;
+  border: 1px solid #dbe4ff;
+  font-size: 13px;
+  color: #344054;
+}
+.chat-file-chip__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-file-chip__del {
+  color: #98a2b3;
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.chat-file-chip__del:hover {
+  color: #ff5d34;
+}
+
+
+/* 对话区拖拽上传遮罩 */
+.chat-drop-overlay {
+  position: absolute;
+  inset: 8px;
+  z-index: 20;
+  border-radius: 12px;
+  border: 2px dashed #155eef;
+  background: rgba(238, 244, 255, 0.92);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.chat-drop-inner {
+  text-align: center;
+  color: #155eef;
+}
+
+
+/* ── 顶栏居中搜索框（炫酷玻璃质感 + 聚焦光晕）── */
+.top-search.ant-input-affix-wrapper {
+  height: 38px;
+  border-radius: 999px;
+  background: #f4f6fb;
+  border: 1px solid transparent;
+  transition: all 0.25s ease;
+  box-shadow: inset 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+.top-search.ant-input-affix-wrapper:hover {
+  background: #eef1f8;
+  border-color: #dbe2f0;
+}
+.top-search.ant-input-affix-wrapper-focused,
+.top-search.ant-input-affix-wrapper:focus-within {
+  background: #fff;
+  border-color: #155eef;
+  box-shadow: 0 0 0 4px rgba(21, 94, 239, 0.12);
+}
+.top-search .ant-input {
+  background: transparent;
+  font-size: 14px;
+}
+.top-search .ant-input-prefix {
+  margin-inline-end: 8px;
+}
+
+/* 沉浸式（音乐页）深色变体 */
+.top-search--dark.ant-input-affix-wrapper {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+}
+.top-search--dark.ant-input-affix-wrapper:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.top-search--dark.ant-input-affix-wrapper-focused,
+.top-search--dark.ant-input-affix-wrapper:focus-within {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(124, 156, 255, 0.7);
+  box-shadow: 0 0 0 4px rgba(124, 156, 255, 0.18);
+}
+.top-search--dark .ant-input {
+  color: #fff;
+}
+.top-search--dark .ant-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+.top-search--dark .ant-input-prefix .anticon,
+.top-search--dark .ant-input-clear-icon {
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+
+
+/* 手机端：播放器悬浮时，对话输入区上移避让，避免被遮挡 */
+@media (max-width: 768px) {
+  .chat-input-bar--player {
+    padding-bottom: 72px;
+  }
+  /* 手机端播放器：迷你态紧凑贴底，不再拉满整宽 */
+  .player-shell {
+    right: 12px;
+    left: 12px;
+    bottom: 12px;
+    width: auto !important;
+    max-width: none;
+  }
+  /* 展开态才需要更宽；迷你态控制已内联到歌名行，整体一行即可 */
+  .player-shell .player-ctrl-btn {
+    width: 34px;
+    height: 34px;
+  }
+  .player-shell .player-ctrl-main {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+
+/* 手机端：音乐厅顶部三个操作按钮自适应排布，避免显示不全 */
+@media (max-width: 768px) {
+  .music-actions {
+    width: 100%;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px !important;
+  }
+  /* AntD Space 用 item 包裹，需让其撑满网格单元 */
+  .music-actions > .ant-space-item {
+    width: 100%;
+  }
+  .music-actions .ant-btn {
+    width: 100%;
+  }
+  /* 「添加歌曲」主按钮占整行，更醒目 */
+  .music-actions > .ant-space-item:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+

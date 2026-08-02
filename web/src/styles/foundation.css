@@ -1,0 +1,155 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* 自适应策略（企业级流式布局）：
+   不使用整体 zoom 缩放（zoom 是固定倍数，无法适应不同尺寸屏幕，且污染 vh/fixed/滚动条）。
+   改为：字号/间距用固定 px（所有屏幕一致、符合用户预期）+ 布局靠 flex / max-width 居中流动。
+   小屏占满宽度，大屏内容居中、两侧留白；多列卡片用 AntD Row/Col 断点降列。
+   详见 .kiro/steering/01-编码规范.md「自适应布局」。 */
+
+body {
+  font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, 'Microsoft YaHei', sans-serif;
+  background: #fafafa;
+  color: #171719;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 自定义滚动条，贴近精致风格 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+
+/* Markdown 正文排版（对话 AI 消息） */
+.markdown-body {
+  font-size: 16px;
+  line-height: 1.75;
+  color: #1d2129;
+  word-break: break-word;
+}
+.markdown-body > *:first-child {
+  margin-top: 0;
+}
+.markdown-body > *:last-child {
+  margin-bottom: 0;
+}
+.markdown-body p {
+  margin: 8px 0;
+}
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  margin: 18px 0 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.markdown-body h1 {
+  font-size: 24px;
+}
+.markdown-body h2 {
+  font-size: 21px;
+}
+.markdown-body h3 {
+  font-size: 18px;
+}
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 24px;
+  margin: 8px 0;
+}
+.markdown-body li {
+  margin: 4px 0;
+}
+.markdown-body blockquote {
+  margin: 10px 0;
+  padding: 4px 14px;
+  border-left: 3px solid #d0d5dd;
+  color: #667085;
+  background: #f9fafb;
+  border-radius: 0 6px 6px 0;
+}
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+}
+/* 表格横向滚动容器：内容超宽时在容器内横向滑动，不挤压单元格 */
+.md-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 12px 0;
+}
+.md-table-wrap table {
+  margin: 0;
+  /* 按内容自然展开，不被窄屏压缩；超出部分横向滚动 */
+  width: auto;
+  min-width: 100%;
+}
+/* 单元格：给最小宽避免被压成「每字一行」，给最大宽避免单列过宽，超长内容正常换行 */
+.md-table-wrap th,
+.md-table-wrap td {
+  min-width: 64px;
+  max-width: 260px;
+  white-space: normal;
+  word-break: break-word;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #e4e7ec;
+  padding: 8px 12px;
+  text-align: left;
+}
+.markdown-body th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+.markdown-body pre {
+  margin: 12px 0;
+}
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+
+/* 自适应内容容器：小屏占满、宽屏收拢居中。
+   用 px 固定上限（企业级后台常规内容宽度），不依赖 zoom/根字号缩放。
+   .fluid-page  常规列表/表单/卡片页（≈1200px 居中）
+   .fluid-narrow 阅读型窄栏（对话/长文，≈760px 居中） */
+.fluid-page {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+}
+.fluid-narrow {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+}
+/* 对话页专用容器：占满可用宽度，消息流与输入区同宽对齐 */
+.chat-fluid {
+  width: 100%;
+  margin-inline: auto;
+}
+
+

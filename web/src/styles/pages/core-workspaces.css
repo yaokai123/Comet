@@ -1,0 +1,241 @@
+/* Shared product-quality treatment for the four daily AI workspaces. */
+.knowledge-workspace .kb-header {
+  margin-bottom: 20px;
+}
+
+.knowledge-workspace .kb-card,
+.knowledge-workspace .kb-row,
+.knowledge-workspace .kb-hit,
+.memory-workspace .memory-card,
+.graph-card,
+.chat-sidebar,
+.chat-main {
+  border-color: #eadab9;
+  box-shadow: 0 14px 30px -28px rgba(86, 53, 7, 0.72);
+}
+
+.knowledge-workspace .kb-card {
+  min-height: 214px;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.knowledge-workspace .kb-card:hover {
+  border-color: #dfb65e;
+  box-shadow: 0 16px 28px -24px rgba(112, 69, 4, 0.58);
+}
+
+.knowledge-workspace .kb-card:focus-visible,
+.chat-group-title:focus-visible,
+.chat-conv-item:focus-visible {
+  outline: 3px solid rgba(217, 144, 18, 0.3);
+  outline-offset: 3px;
+}
+
+.knowledge-workspace .kb-card-actions {
+  margin-top: auto;
+  border-top-color: #f1e4ca;
+}
+
+.knowledge-workspace .kb-row,
+.knowledge-workspace .kb-hit {
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.knowledge-workspace .kb-row:hover {
+  border-color: #dfb65e;
+  box-shadow: 0 12px 20px -20px rgba(112, 69, 4, 0.6);
+}
+
+.chat-sidebar {
+  border-radius: 8px;
+  background: #fffaf0;
+}
+
+.chat-main {
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.chat-new-btn {
+  background: #d99012 !important;
+  box-shadow: none;
+}
+
+.chat-new-btn:hover {
+  background: #b97000 !important;
+}
+
+.chat-conv-item.active {
+  color: #8d5700;
+  background: #fff0cd;
+}
+
+.chat-conv-item.active::before {
+  background: #d99012;
+}
+
+.chat-main .chat-empty-orb {
+  border-radius: 8px;
+  background: #fff1d0;
+  box-shadow: none;
+}
+
+.chat-main .chat-suggestion {
+  border-radius: 8px;
+  border-color: #eadab9;
+  background: #fffdf8;
+}
+
+.chat-main .chat-suggestion:hover {
+  border-color: #d99012;
+  color: #8d5700;
+  background: #fff5df;
+  box-shadow: none;
+}
+
+.chat-input-bar {
+  background: #fffdf8;
+}
+
+.chat-input-box {
+  border-radius: 8px;
+  border-color: #eadab9;
+}
+
+.memory-workspace .memory-card,
+.graph-card {
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.memory-workspace .memory-card .ant-card-head,
+.graph-card .ant-card-head {
+  border-bottom-color: #f0e2c8;
+  background: #fffaf0;
+}
+
+.memory-workspace .memory-tabs {
+  background: #f7ecd6;
+}
+
+.memory-workspace .memory-tabs .ant-segmented-item-selected {
+  color: #764900;
+  box-shadow: 0 1px 2px rgba(96, 58, 5, 0.16);
+}
+
+.memory-workspace .insight-banner {
+  border-radius: 8px;
+  border-color: #eadab9;
+  background: #fff8e9;
+}
+
+.memory-workspace .insight-item,
+.memory-workspace .memory-entity-card {
+  border-radius: 8px;
+  border-color: #eadab9;
+}
+
+.graph-workspace {
+  min-height: 0;
+}
+
+.graph-card .ant-card-extra {
+  max-width: 100%;
+}
+
+.graph-canvas {
+  background-color: #fffdf8;
+  background-image: linear-gradient(#f3ead8 1px, transparent 1px), linear-gradient(90deg, #f3ead8 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+@media (max-width: 768px) {
+  .knowledge-workspace .kb-header {
+    align-items: stretch;
+    margin-bottom: 14px;
+  }
+
+  .knowledge-workspace .kb-header .ant-btn {
+    width: 100%;
+  }
+
+  .knowledge-workspace .kb-card {
+    min-height: 0;
+    padding: 16px;
+  }
+
+  .knowledge-workspace .kb-row {
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .knowledge-workspace .kb-row-actions {
+    margin-left: auto;
+  }
+
+  .chat-layout {
+    gap: 0 !important;
+  }
+
+  .chat-main {
+    border-radius: 8px;
+  }
+
+  .chat-main .chat-scroll {
+    padding-top: 16px !important;
+  }
+
+  .chat-main .chat-fluid {
+    padding-inline: 14px !important;
+  }
+
+  .chat-main .chat-empty {
+    padding-inline: 16px;
+  }
+
+  .chat-main .chat-empty-orb {
+    width: 62px;
+    height: 62px;
+    font-size: 30px;
+  }
+
+  .chat-main .chat-suggestions {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .chat-main .chat-suggestion {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+
+  .memory-workspace .memory-card .ant-card-head {
+    min-height: 96px;
+    padding-inline: 14px;
+  }
+
+  .memory-workspace .memory-card .ant-card-body {
+    padding: 16px;
+  }
+
+  .graph-card .ant-card-head {
+    padding-inline: 12px;
+  }
+
+  .graph-canvas {
+    min-height: 26rem !important;
+    background-size: 20px 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .knowledge-workspace .kb-card,
+  .knowledge-workspace .kb-row,
+  .chat-main .chat-suggestion {
+    transition: none;
+  }
+}

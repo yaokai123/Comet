@@ -1,0 +1,178 @@
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.18); }
+  50%      { box-shadow: 0 0 0 6px rgba(22, 119, 255, 0.08); }
+}
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+
+/* Drawer 标题区:flex item 默认 min-width:auto 会被长标题撑开导致溢出。
+   设 min-width:0 + overflow:hidden,让标题内的 ellipsis 真正生效(尤其手机端)。 */
+.ant-drawer-title {
+  min-width: 0;
+  overflow: hidden;
+}
+.ant-drawer-header-title {
+  min-width: 0;
+}
+.task-drawer .ant-drawer-content {
+  background: #fffdf8;
+}
+
+.task-drawer .ant-drawer-header {
+  border-bottom-color: #eadcc1;
+  background: #fff9ec;
+}
+
+.task-drawer__title,
+.task-drawer__section-head,
+.task-drawer__row {
+  display: flex;
+  align-items: center;
+}
+
+.task-drawer__title {
+  gap: 10px;
+  color: #2c2317;
+  font-weight: 750;
+}
+
+.task-drawer__intro {
+  display: flex;
+  gap: 8px;
+  padding: 11px 12px;
+  color: #76654d;
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px solid #eddfc2;
+  border-radius: 6px;
+  background: #fff8e9;
+}
+
+.task-drawer__section {
+  margin-top: 24px;
+}
+
+.task-drawer__section-head {
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: #47351e;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.task-drawer__section-head > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.task-drawer__section .ant-empty {
+  margin: 16px 0;
+}
+
+.task-drawer__section .ant-empty-description {
+  color: #9a876a;
+  font-size: 13px;
+}
+
+.task-drawer__row {
+  width: 100%;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 10px;
+  border: 1px solid #eddfc8;
+  border-radius: 6px;
+  color: inherit;
+  background: #fffefa;
+  cursor: pointer;
+  text-align: left;
+}
+
+.task-drawer__row:hover {
+  border-color: #dfbd75;
+  background: #fff8e9;
+}
+
+.task-drawer__row:focus-visible {
+  outline: 3px solid rgba(183, 121, 31, 0.28);
+  outline-offset: 2px;
+}
+
+.task-drawer__icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  flex: 0 0 auto;
+}
+
+.task-drawer__icon--agent {
+  color: #8b5a13;
+  background: #faeac7;
+}
+
+.task-drawer__icon--document {
+  color: #3a765d;
+  background: #e5f1e9;
+}
+
+.task-drawer__icon--image {
+  color: #8a5c22;
+  background: #f8e7c8;
+}
+
+.task-drawer__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.task-drawer__body strong,
+.task-drawer__body small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-drawer__body strong {
+  color: #3d2d19;
+  font-size: 13px;
+}
+
+.task-drawer__body small {
+  margin-top: 3px;
+  color: #87745a;
+  font-size: 12px;
+}
+
+.task-drawer__body .ant-progress {
+  margin-top: 7px;
+}
+
+.task-drawer__body .ant-progress-bg {
+  background: #b7791f !important;
+}
+
+.task-drawer__arrow {
+  color: #aa9778;
+  font-size: 11px;
+}
+
+.task-drawer__hint {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid #eddfc8;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+@media (max-width: 768px) {
+  .task-drawer .ant-drawer-content-wrapper {
+    width: min(100vw, 420px) !important;
+  }
+}

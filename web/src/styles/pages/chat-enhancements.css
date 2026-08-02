@@ -1,0 +1,622 @@
+/* ── 对话页：技能选择器 + 快捷提问 ── */
+.chat-skill-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.chat-skill-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #e4e7ec;
+  border-radius: 999px;
+  background: #fff;
+  color: #475467;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.chat-skill-trigger:hover {
+  border-color: #7c9cff;
+  color: #155eef;
+}
+.chat-skill-trigger.on {
+  border-color: #155eef;
+  background: #eef4ff;
+  color: #155eef;
+  font-weight: 500;
+}
+.chat-skill-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: #f2f4f7;
+  color: #98a2b3;
+  cursor: pointer;
+  font-size: 11px;
+}
+.chat-skill-clear:hover {
+  background: #ffe7e0;
+  color: #ff5d34;
+}
+.chat-quick-prompt {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #e4e7ec;
+  border-radius: 999px;
+  background: #fafbfc;
+  color: #475467;
+  font-size: 13px;
+  cursor: pointer;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.18s ease;
+}
+.chat-quick-prompt:hover:not(:disabled) {
+  border-color: #5cc0ec;
+  color: #0ea5e9;
+  background: #f0f9ff;
+}
+.chat-quick-prompt:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.chat-skill-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.chat-skill-opt {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #344054;
+  transition: background 0.15s ease;
+}
+.chat-skill-opt:hover {
+  background: #f2f4f7;
+}
+.chat-skill-opt.active {
+  background: #eef4ff;
+  color: #155eef;
+  font-weight: 500;
+}
+.chat-skill-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: #98a2b3;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .skill-hero {
+    padding: 20px 18px;
+  }
+  .skill-hero-title {
+    font-size: 21px;
+  }
+  .skill-hero-content {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .skill-gallery {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .chat-quick-prompt {
+    max-width: 180px;
+  }
+}
+
+/* ── 记忆页：AI 眼中的你 ── */
+.insight-banner {
+  position: relative;
+  border-radius: 16px;
+  padding: 18px 20px 20px;
+  overflow: hidden;
+  background: #f6f8fc;
+  border: 1px solid #e9eef6;
+}
+.insight-banner-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.insight-banner-title {
+  color: #1d2939;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.insight-banner-empty {
+  position: relative;
+  color: #667085;
+  font-size: 13.5px;
+  line-height: 1.8;
+  background: #fff;
+  border: 1px solid #eceef2;
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.memory-entity-card {
+  border-color: #eef0f4;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+.memory-entity-card--weak {
+  background: linear-gradient(180deg, #fffaf0 0%, #fff 56%);
+  border-color: #ffe3a3;
+  box-shadow: 0 10px 26px -22px rgba(181, 101, 29, 0.38);
+}
+.memory-entity-card--weak:hover {
+  border-color: #ffc766;
+  box-shadow: 0 14px 30px -22px rgba(181, 101, 29, 0.48);
+}
+.insight-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 12px;
+}
+.insight-item {
+  position: relative;
+  background: #fff;
+  border: 1px solid #eceef2;
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 8px -4px rgba(16, 24, 40, 0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.insight-item:hover {
+  transform: translateY(-2px);
+  border-color: #d4def0;
+  box-shadow: 0 10px 24px -12px rgba(21, 94, 239, 0.28);
+}
+.insight-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.insight-del {
+  color: #c7c9d1;
+  cursor: pointer;
+  font-size: 13px;
+  transition: color 0.15s ease;
+}
+.insight-del:hover {
+  color: #ff5d34;
+}
+.insight-content {
+  color: #344054;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+@media (max-width: 768px) {
+  .insight-grid {
+    grid-template-columns: 1fr;
+  }
+  .insight-banner {
+    padding: 14px 14px 16px;
+  }
+}
+
+/* ── 全局弹窗（Modal）统一美化 ── */
+.ant-modal .ant-modal-content {
+  border-radius: 16px;
+  padding: 22px 24px 20px;
+  box-shadow:
+    0 24px 48px -12px rgba(16, 24, 40, 0.18),
+    0 0 0 1px rgba(16, 24, 40, 0.04);
+}
+.ant-modal .ant-modal-header {
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #f0f1f4;
+}
+.ant-modal .ant-modal-body {
+  padding-top: 2px;
+}
+.ant-modal .ant-modal-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #1d2939;
+  letter-spacing: 0.2px;
+}
+/* 关闭按钮：圆形浅底，hover 变深 */
+.ant-modal .ant-modal-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  top: 18px;
+  inset-inline-end: 18px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.ant-modal .ant-modal-close:hover {
+  background: #f2f4f7;
+}
+.ant-modal .ant-modal-close-x {
+  width: 32px;
+  height: 32px;
+  line-height: 32px;
+  font-size: 15px;
+  color: #98a2b3;
+}
+/* 底部按钮区：与内容拉开距离 + 按钮更圆润 */
+.ant-modal .ant-modal-footer {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f1f4;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.ant-modal .ant-modal-footer .ant-btn {
+  border-radius: 9px;
+  min-width: 76px;
+  height: 38px;
+}
+.ant-modal .ant-modal-footer .ant-btn + .ant-btn {
+  margin-inline-start: 0;
+}
+/* 弹窗内输入框：更高、圆角、聚焦蓝光圈，与整体精致感统一 */
+.ant-modal .ant-input,
+.ant-modal .ant-input-affix-wrapper,
+.ant-modal .ant-input-number,
+.ant-modal .ant-picker,
+.ant-modal .ant-select .ant-select-selector {
+  border-radius: 10px;
+}
+.ant-modal .ant-input,
+.ant-modal .ant-input-affix-wrapper,
+.ant-modal .ant-select-single .ant-select-selector {
+  min-height: 40px;
+}
+.ant-modal .ant-input:hover,
+.ant-modal .ant-input-affix-wrapper:hover,
+.ant-modal .ant-select:hover .ant-select-selector {
+  border-color: #adc6ff;
+}
+.ant-modal textarea.ant-input {
+  min-height: auto;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+/* 表单项标签与控件间距更舒展 */
+.ant-modal .ant-form-item {
+  margin-bottom: 18px;
+}
+.ant-modal .ant-form-item-label > label {
+  font-weight: 500;
+  color: #344054;
+}
+/* 确认类对话框（Modal.confirm）图标与文字间距更舒展 */
+.ant-modal-confirm .ant-modal-confirm-body {
+  align-items: flex-start;
+}
+.ant-modal-confirm .ant-modal-confirm-title {
+  font-weight: 700;
+  color: #1d2939;
+}
+.ant-modal-confirm .ant-modal-confirm-btns {
+  margin-top: 22px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.ant-modal-confirm .ant-modal-confirm-btns .ant-btn {
+  border-radius: 9px;
+  min-width: 72px;
+  height: 36px;
+}
+
+/* 手机端：写死 width 的弹窗（如 680px 的编辑弹窗）限宽，避免横向溢出 */
+@media (max-width: 768px) {
+  /* 移动端弹窗居中：不用 display:flex（会覆盖 AntD 关闭时的 display:none 导致遮罩残留）
+     改用 text-align 居中 + inline-block 的经典方式 */
+  .ant-modal-wrap {
+    text-align: center !important;
+    padding: 12px !important;
+  }
+  .ant-modal-wrap::before {
+    content: "";
+    display: inline-block;
+    height: 0;
+    vertical-align: top;
+  }
+  .ant-modal {
+    display: inline-block !important;
+    text-align: left !important;
+    max-width: 100% !important;
+    width: calc(100% - 24px) !important;
+    margin: 0 auto !important;
+    top: 0 !important;
+    padding-bottom: 0 !important;
+    vertical-align: top !important;
+  }
+  .ant-modal-content {
+    padding: 16px !important;
+  }
+}
+
+/* 今日回顾：前瞻关怀句 + 聊聊 */
+.daily-care {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: linear-gradient(120deg, #fff7e6 0%, #fff1f0 100%);
+  border: 1px solid #ffe7ba;
+}
+.daily-care-text {
+  color: #874d00;
+  font-size: 14px;
+  line-height: 1.6;
+  flex: 1;
+}
+@media (max-width: 768px) {
+  .daily-care {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+}
+
+/* 划词追问：选区浮动工具条 */
+.sel-popover {
+  position: fixed;
+  z-index: 1200;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: #1f2329;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.4);
+  animation: sel-pop-in 0.12s ease;
+}
+@keyframes sel-pop-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.sel-popover::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid #1f2329;
+}
+.sel-popover-btn {
+  border: none;
+  background: transparent;
+  color: #fff;
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+.sel-popover-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.sel-popover-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* 对话分享按钮（对话区右上角悬浮） */
+.chat-share-btn {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 20;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px -6px rgba(16, 24, 40, 0.25);
+}
+
+/* 分享公开查看页 */
+.share-loading {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.share-page {
+  min-height: 100vh;
+  background: #f5f7fb;
+  padding: 24px 16px;
+}
+.share-container {
+  max-width: 820px;
+  margin: 0 auto;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 10px 40px -20px rgba(16, 24, 40, 0.25);
+  overflow: hidden;
+}
+.share-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 24px;
+  border-bottom: 1px solid #f0f0f0;
+  background: linear-gradient(120deg, #155eef 0%, #22d3ee 100%);
+}
+.share-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+.share-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+.share-sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+  margin-top: 2px;
+}
+.share-body {
+  padding: 24px;
+}
+.share-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.share-msg-user {
+  flex-direction: row-reverse;
+}
+.share-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+.share-avatar-user {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #155eef, #2f7bff);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.share-avatar-ai {
+  border: 1px solid #eef0f4;
+  background: #fff;
+}
+.share-msg-user .share-bubble {
+  background: #eef4ff;
+  color: #1d2129;
+}
+.share-msg-ai .share-bubble {
+  background: #f7f8fa;
+  color: #1d2129;
+}
+.share-bubble {
+  display: inline-block;
+  max-width: calc(100% - 44px);
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 15px;
+  line-height: 1.75;
+}
+.share-bubble-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-width: calc(100% - 44px);
+  align-items: flex-start;
+}
+.share-msg-user .share-bubble-wrap {
+  align-items: flex-end;
+}
+.share-bubble-wrap .share-bubble {
+  max-width: 100%;
+  width: fit-content;
+}
+.share-sender {
+  font-size: 12.5px;
+  color: #667085;
+  font-weight: 600;
+  padding-left: 2px;
+}
+.share-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.share-image {
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid #eef0f4;
+}
+.share-footer {
+  text-align: center;
+  padding: 16px;
+  font-size: 13px;
+  color: #98a2b3;
+  border-top: 1px solid #f0f0f0;
+}
+.share-footer a {
+  color: #155eef;
+  cursor: pointer;
+}
+@media (max-width: 768px) {
+  .share-bubble {
+    max-width: 100%;
+  }
+}
+
+/* 我的分享列表 */
+.share-list {
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.share-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #eceef2;
+  border-radius: 10px;
+}
+.share-list-info {
+  min-width: 0;
+  flex: 1;
+}
+.share-list-title {
+  font-size: 14px;
+  color: #1d2129;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-list-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #98a2b3;
+}
+

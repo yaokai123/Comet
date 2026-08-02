@@ -1,0 +1,181 @@
+/* ── 登录/注册页（苹果风：居中极简、浅色、单列自适应） ── */
+.applogin {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  background: linear-gradient(180deg, #fbfbfd 0%, #f1f3f8 100%);
+  overflow: hidden;
+}
+/* 柔和光斑背景，不抢眼 */
+.applogin-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(420px 420px at 18% 12%, rgba(21, 94, 239, 0.10), transparent 70%),
+    radial-gradient(460px 460px at 84% 88%, rgba(124, 77, 255, 0.08), transparent 70%);
+}
+.applogin-box {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 400px;
+  margin-inline: auto;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 22px;
+  padding: 40px 34px 30px;
+  box-shadow: 0 24px 70px -30px rgba(16, 24, 40, 0.30);
+}
+.applogin-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  object-fit: cover;
+  box-shadow: 0 8px 22px -8px rgba(21, 94, 239, 0.45);
+}
+.applogin-title {
+  margin: 18px 0 6px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: #1d1d1f;
+}
+.applogin-sub {
+  margin: 0 0 18px;
+  font-size: 14px;
+  color: #86868b;
+}
+.applogin-box .ant-tabs-nav {
+  margin-bottom: 18px;
+}
+.applogin-box .ant-tabs-nav::before {
+  border-bottom: none;
+}
+/* 苹果风输入框：浅灰填充、大圆角、聚焦淡蓝环 */
+.applogin-box .ant-input-affix-wrapper {
+  border-radius: 12px;
+  background: #f5f5f7;
+  border: 1px solid transparent;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+.applogin-box .ant-input-affix-wrapper:hover {
+  background: #f0f0f3;
+}
+.applogin-box .ant-input-affix-wrapper-focused,
+.applogin-box .ant-input-affix-wrapper:focus-within {
+  background: #fff;
+  border-color: #155eef;
+  box-shadow: 0 0 0 3px rgba(21, 94, 239, 0.14);
+}
+.applogin-box .ant-input-affix-wrapper .ant-input {
+  background: transparent;
+}
+.applogin-box .ant-input-prefix {
+  color: #b0b0b8;
+  margin-inline-end: 8px;
+}
+.applogin-box .ant-btn-primary {
+  border-radius: 12px;
+}
+.login2-remember {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.applogin-foot {
+  margin-top: 22px;
+  font-size: 12px;
+  color: #b6bdc9;
+}
+@media (max-width: 768px) {
+  .applogin {
+    padding: 24px 16px;
+  }
+  .applogin-box {
+    padding: 32px 22px 24px;
+    border-radius: 20px;
+  }
+  .applogin-title {
+    font-size: 25px;
+  }
+}
+
+/* 手机端：MCP 服务卡片操作区改成等分网格，去掉 antd 分隔点，按钮撑满更整齐 */
+@media (max-width: 768px) {
+  .mcp-servers-card .ant-list-item {
+    padding: 14px 0;
+  }
+  .mcp-servers-card .ant-list-item-action {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+    margin-top: 12px;
+    margin-inline-start: 0;
+  }
+  .mcp-servers-card .ant-list-item-action > li {
+    padding: 0;
+    width: 100%;
+    text-align: center;
+  }
+  .mcp-servers-card .ant-list-item-action > li .ant-btn {
+    width: 100%;
+  }
+  /* 去掉 action 之间的竖线分隔符 */
+  .mcp-servers-card .ant-list-item-action-split {
+    display: none;
+  }
+  /* 「启用/停用」开关单独占一格，垂直居中靠左 */
+  .mcp-servers-card .ant-list-item-action > li:last-child {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+  }
+  /* 服务地址等长文本换行，避免横向溢出 */
+  .mcp-servers-card .ant-list-item-meta-description {
+    word-break: break-all;
+  }
+}
+
+/* 分享对话弹窗：表单字段标签（标题/有效期统一样式） */
+.share-field-label {
+  font-size: 13px;
+  color: #344054;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+/* 手机端：分享弹窗触控与排版优化 */
+@media (max-width: 768px) {
+  /* 「我的分享」列表更高一点，单屏能多看几条 */
+  .share-list {
+    max-height: 46vh;
+  }
+  /* 列表项内边距加大，复制/删除按钮做成更大的触控目标 */
+  .share-list-item {
+    padding: 12px;
+  }
+  .share-list-item .ant-btn {
+    width: 36px;
+    height: 36px;
+  }
+  /* 标题/有效期输入控件加高，手机更好点 */
+  .ant-modal .share-field-label + .ant-input,
+  .ant-modal .share-field-label + .ant-select .ant-select-selector {
+    min-height: 40px;
+  }
+}
+
+

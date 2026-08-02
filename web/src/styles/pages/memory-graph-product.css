@@ -1,0 +1,88 @@
+﻿/* Memory and graph share evidence-first rather than decoration-first semantics. */
+.memory-workspace .memory-card {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.memory-workspace .memory-card .ant-card-head {
+  min-height: 58px;
+  background: var(--comet-surface-muted) !important;
+}
+
+.memory-workspace .memory-tabs {
+  padding: 3px;
+  border: 1px solid var(--comet-line);
+  background: #f4ecd9 !important;
+}
+
+.memory-workspace .memory-tabs .ant-segmented-item-selected {
+  background: var(--comet-surface) !important;
+  box-shadow: none !important;
+}
+
+.memory-workspace .ant-tag-blue,
+.memory-workspace .ant-tag-geekblue {
+  border-color: #e8c983 !important;
+  background: #fff4d9 !important;
+  color: #754912 !important;
+}
+
+.memory-workspace .memory-entity-card {
+  box-shadow: none !important;
+}
+
+.memory-workspace .memory-entity-card:hover {
+  border-color: var(--comet-line-strong) !important;
+  box-shadow: 0 10px 20px -22px rgba(77, 55, 21, 0.48) !important;
+}
+
+.memory-workspace .memory-relations {
+  border-left: 2px solid #e8c983;
+}
+
+.graph-card {
+  border-color: var(--comet-line) !important;
+}
+
+.graph-card .ant-card-head {
+  min-height: 58px;
+  padding-inline: 18px;
+}
+
+.graph-canvas {
+  background-color: var(--comet-surface) !important;
+  background-image: linear-gradient(#f1e6d1 1px, transparent 1px), linear-gradient(90deg, #f1e6d1 1px, transparent 1px) !important;
+}
+
+@media (max-width: 768px) {
+  .kb-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .kb-overview__intro {
+    grid-column: 1 / -1;
+  }
+
+  .kb-overview__stat:nth-of-type(2) {
+    border-left: 0;
+  }
+
+  .kb-overview__intro,
+  .kb-overview__stat {
+    min-height: 66px;
+    padding: 12px 14px;
+  }
+
+  .knowledge-detail-workspace .kb-detail-header {
+    gap: 12px;
+  }
+
+  .kb-import-action .ant-btn {
+    width: 100%;
+  }
+
+  .memory-workspace .memory-card .ant-card-head {
+    min-height: 104px;
+  }
+}
+

@@ -1,0 +1,103 @@
+:root {
+  /* Semantic color roles. Page code should reference roles, not raw hex values. */
+  --comet-bg: #f7f3ea;
+  --comet-surface: #fffdf8;
+  --comet-surface-raised: #fff8e9;
+  --comet-surface-subtle: #faf6ed;
+  --comet-border: #eadcc1;
+  --comet-border-strong: #d7c7aa;
+  --comet-text: #2c2317;
+  --comet-muted: #76654d;
+  --comet-subtle: #9a876a;
+  --comet-primary: #b7791f;
+  --comet-primary-hover: #955f14;
+  --comet-primary-soft: #faebc9;
+  --comet-success: #287a55;
+  --comet-success-soft: #e5f1e9;
+  --comet-warning: #b96e12;
+  --comet-warning-soft: #fff1d2;
+  --comet-danger: #c94242;
+  --comet-danger-soft: #fce9e7;
+  --comet-info: #4d6b9b;
+  --comet-info-soft: #eaf0fa;
+  --comet-focus: rgba(183, 121, 31, 0.28);
+  --comet-radius-sm: 6px;
+  --comet-radius-md: 8px;
+  --comet-radius-lg: 12px;
+  --comet-space-1: 4px;
+  --comet-space-2: 8px;
+  --comet-space-3: 12px;
+  --comet-space-4: 16px;
+  --comet-space-5: 20px;
+  --comet-space-6: 24px;
+  --comet-shadow-card: 0 16px 36px -30px rgba(77, 55, 21, 0.42);
+}
+
+body {
+  background: var(--comet-bg);
+  color: var(--comet-text);
+}
+
+.app-main,
+.app-content {
+  background: var(--comet-bg) !important;
+}
+
+.app-sider {
+  background: #fffdf8 !important;
+}
+
+.app-sider .ant-menu-item-group-title {
+  padding-top: 14px;
+  color: #9a876a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.app-sider .ant-menu-item,
+.app-sider .ant-menu-submenu-title {
+  width: calc(100% - 16px);
+  margin-inline: 8px;
+  border-radius: 6px;
+}
+
+.app-sider .ant-menu-item-selected {
+  color: #7a4c0b !important;
+  font-weight: 700;
+  background: #faebc9 !important;
+}
+
+.app-sider .ant-menu-item:hover {
+  color: #8c570c !important;
+  background: #fff4dd !important;
+}
+
+.ant-btn-primary {
+  border-color: var(--comet-primary) !important;
+  background: var(--comet-primary) !important;
+  box-shadow: none !important;
+}
+
+.ant-btn-primary:hover,
+.ant-btn-primary:focus {
+  border-color: var(--comet-primary-hover) !important;
+  background: var(--comet-primary-hover) !important;
+}
+
+.ant-btn:focus-visible,
+.ant-input:focus-visible,
+.ant-input-affix-wrapper:focus-within {
+  outline: 3px solid var(--comet-focus);
+  outline-offset: 1px;
+}
+
+.header-task-trigger {
+  color: #6e5734 !important;
+  font-size: 17px;
+}
+
+.header-task-trigger:hover {
+  color: #8c570c !important;
+  background: #fff2d8 !important;
+}

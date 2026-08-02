@@ -1,0 +1,205 @@
+/* ── 登录页炫酷背景 ── */
+@keyframes auth-gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+@keyframes auth-float {
+  0% {
+    transform: translateY(0) translateX(0) scale(1);
+  }
+  50% {
+    transform: translateY(-30px) translateX(20px) scale(1.08);
+  }
+  100% {
+    transform: translateY(0) translateX(0) scale(1);
+  }
+}
+.auth-hero {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(125deg, #0b1020, #1d2b53 40%, #155eef 75%, #6d28d9 100%);
+  background-size: 300% 300%;
+  animation: auth-gradient 16s ease infinite;
+}
+/* 漂浮的霓虹光球 */
+.auth-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+.auth-orb.o1 {
+  width: 360px;
+  height: 360px;
+  background: #6366f1;
+  top: -80px;
+  left: -60px;
+  animation: auth-float 12s ease-in-out infinite;
+}
+.auth-orb.o2 {
+  width: 300px;
+  height: 300px;
+  background: #ec4899;
+  bottom: -60px;
+  right: -40px;
+  animation: auth-float 15s ease-in-out infinite reverse;
+}
+.auth-orb.o3 {
+  width: 240px;
+  height: 240px;
+  background: #38bdf8;
+  top: 45%;
+  left: 50%;
+  animation: auth-float 18s ease-in-out infinite;
+}
+/* 细网格叠加 */
+.auth-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 26px 26px;
+  pointer-events: none;
+}
+.auth-logo-badge {
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  font-weight: 700;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+/* 移动端：隐藏左侧品牌区时给表单区也来点光 */
+.auth-form-side {
+  position: relative;
+}
+
+
+/* ── 登录页：居中玻璃卡 + 入场动画 + 视差 ── */
+.auth-full {
+  position: relative;
+  height: 100%;
+  min-height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+@keyframes auth-card-in {
+  0% {
+    opacity: 0;
+    transform: translateY(28px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.auth-card {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 16px;
+  padding: 36px 34px 30px;
+  border-radius: 22px;
+  background: rgba(20, 22, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(22px);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  color: #fff;
+  animation: auth-card-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: transform 0.15s ease-out;
+  will-change: transform;
+}
+.auth-card-glow {
+  position: absolute;
+  inset: -1px;
+  border-radius: 22px;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(99,102,241,0.6), rgba(236,72,153,0.5), rgba(56,189,248,0.5));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+/* 玻璃卡里 antd 表单深色适配 */
+.auth-card .ant-input-affix-wrapper,
+.auth-card .ant-input {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+.auth-card .ant-input-affix-wrapper:hover,
+.auth-card .ant-input:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+}
+.auth-card .ant-input-affix-wrapper-focused {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.25);
+}
+.auth-card .ant-input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+.auth-card .ant-input-affix-wrapper .anticon,
+.auth-card .ant-input-password-icon {
+  color: rgba(255, 255, 255, 0.5);
+}
+.auth-card .ant-input-affix-wrapper input {
+  background: transparent;
+  color: #fff;
+}
+/* 自动填充时背景不发白 */
+.auth-card input:-webkit-autofill,
+.auth-card input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #fff;
+  transition: background-color 9999s;
+}
+/* 校验失败(error)状态也保持深底白字，避免白底白字看不见输入 */
+.auth-card .ant-input-affix-wrapper-status-error,
+.auth-card .ant-input-status-error,
+.auth-card .ant-input-affix-wrapper-status-error .ant-input {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #fff !important;
+}
+.auth-card .ant-input-affix-wrapper-status-error input,
+.auth-card .ant-input-affix-wrapper input {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff;
+}
+.auth-card .ant-tabs-tab {
+  color: rgba(255, 255, 255, 0.6);
+}
+.auth-card .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #fff !important;
+}
+.auth-card .ant-tabs-ink-bar {
+  background: #818cf8;
+}
+.auth-card .ant-tabs-top > .ant-tabs-nav::before {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+.auth-card .ant-form-item-explain-error {
+  color: #fca5a5;
+}
+
+
