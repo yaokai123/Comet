@@ -113,7 +113,7 @@ Comet 是一个多用户的个人 AI 知识库 + 记忆助手：把你的文档�
 ### 第 1 步：克隆代码
 
 ```bash
-git clone git@github.com:lm041520/Comet.git
+git clone git@github.com:yaokai123/Comet.git
 cd Comet
 ```
 
