@@ -49,6 +49,7 @@ eval/
 - **RAG 检索**（仿 BEIR / NQ / HotpotQA 开放域问答）：`fixtures/corpus/` 10 篇通用百科（居里夫人、镭、诺贝尔奖、青霉素、长城、珠峰、大熊猫、光合作用、太阳系、长江），`gold/retrieval.json` 22 题，含**单跳**（答案在单篇）与**多跳**（需跨多篇，如「发现镭的科学家获了什么奖」要串起居里夫人↔诺贝尔奖）。
 - **记忆系统**(中文长对话个人陈述):`fixtures/dialogues.json` 是同一人设跨多段的个人陈述(上海产品经理、老家成都、复旦新闻系、养布偶猫团子、爱爬山摄影、学日语、喝拿铁、用 iPhone+索尼相机、妹妹林晓在成都);gold 的抽取三元组**严格使用受控词表谓词**(属于类型 / 位于 / 拥有 / 偏好 / 了解 / 使用 / 关联于…)。**项目记忆萃取流水线为中文优先**,prompts 与受控词表全中文,英文场景不在评测覆盖内(原计划接入的 LongMemEval-S 已下架,避免翻译噪声与实体名失真)。
 - **RAGAS**：`gold/ragas.json` 含 12 条中文参考答案、相关文档 ID 与题型标注，覆盖单跳、多来源与跨文档多跳。参考答案只使用仓库内语料可支持的事实。
+- **CMRC 2018 大规模 RAGAS**：使用人工标注的中文维基百科阅读理解验证集（3,219 题）构造封闭检索语料；固定 Hugging Face revision 与随机种子，按答案/上下文长度分层采样，并混入训练集文档作为 distractor。相关文档强制进入 corpus，问答只取 validation，避免训练问题泄漏。
 
 > 想换成贴合自己数据的场景，直接替换 `fixtures/` 下对应文件即可（语料文件名即 `relevant_doc_ids`）。
 
@@ -69,13 +70,23 @@ uv run python -m eval.run_eval --skip-setup     # 数据已写过，直接评测
 uv run python -m eval.run_eval --skip-check     # 跳过模型可用性自检
 uv run python -m eval.run_eval --only retrieval # 只跑 RAG 检索（retrieval/memory/extraction/dedup）
 uv run python -m eval.run_eval --teardown       # 跑完清理评测数据
-uv run python -m eval.run_eval --benchmark ragas --reset --sample 12 --top-k 5
+# 默认标准档：CMRC validation 200 题 + 约 1000 篇文档
+uv run python -m eval.run_eval --benchmark ragas --ragas-profile standard --top-k 5
+
+# 快速回归：仓库内 12 题
+uv run python -m eval.run_eval --benchmark ragas --ragas-profile smoke --reset
+
+# 严格档：CMRC validation 500 题 + 约 3000 篇文档（成本较高）
+uv run python -m eval.run_eval --benchmark ragas --ragas-profile rigorous --top-k 5
+
+# 自定义规模（corpus 必须不少于 sample）
+uv run python -m eval.run_eval --benchmark ragas --sample 300 --ragas-corpus-limit 1500
 ```
 
 > 正式跑前会先做**模型可用性自检**：分别调用 embedding / chat / rerank 确认连得通（embedding 还会校验维度是否与 ES 索引一致），不通的必需模型直接中止、rerank 不通则自动跳过其对比列，避免灌了一半数据才发现 key/url 写错。
 > 全程带**进度日志**（写入第几篇语料 / 第几段对话萃取、评测第几题），方便看卡在哪一步。
 
-普通结果在 `eval/results/`。RAGAS 结果位于 `eval/results/ragas/<UTC-run-id>/`，包含 `manifest.json`、`samples.jsonl`、`summary.json` 与 `report.md`。只有 `metric_error_count = 0` 的完整运行才适合用于对外指标声明。
+普通结果在 `eval/results/`。RAGAS 结果位于 `eval/results/ragas/<UTC-run-id>/`，包含 `manifest.json`、`samples.jsonl`、`summary.json` 与 `report.md`，并报告均值的 95% bootstrap 置信区间。只有 `metric_error_count = 0` 的完整运行才适合用于对外指标声明。
 
 ## 指标
 
@@ -89,4 +100,6 @@ uv run python -m eval.run_eval --benchmark ragas --reset --sample 12 --top-k 5
 
 ## 诚实声明
 
-均为**小规模自建 gold 集**的离线自测，非大规模公开 benchmark。RAGAS 的 LLM-as-a-Judge 分数会受裁判模型、提示词和版本影响，不能与其他配置下的分数直接横向比较。简历/汇报请同时披露样本规模、RAGAS 版本、生成模型、裁判模型、top-k 与数据集哈希。
+`smoke` 与 L1 项目属于**小规模自建 gold 集**的离线自测；`standard/rigorous` 使用 CMRC 2018 公共数据。RAGAS 的 LLM-as-a-Judge 分数会受裁判模型、提示词和版本影响，不能与其他配置下的分数直接横向比较。简历/汇报请同时披露样本规模、RAGAS 版本、生成模型、裁判模型、top-k 与数据集哈希。
+
+CMRC 2018 standard/rigorous 属于公共基准，但它主要覆盖中文维基百科抽取式单跳问答，不能代表私有业务数据、多轮记忆或 DeepSearch 的全部效果。公开结果应标注数据集为 `hfl/cmrc2018`、validation split、profile、corpus 数量、seed 和置信区间，并按数据集要求保留原始论文引用与 CC BY-SA 4.0 署名。

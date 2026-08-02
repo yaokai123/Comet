@@ -141,7 +141,7 @@ async def _run_benchmark(args, embed, chat, rerank) -> None:
             from eval.benchmarks.hotpotqa import run_benchmark
             await run_benchmark(
                 embed, chat, rerank,
-                sample=args.sample,
+                sample=args.sample or 100,
                 verifier=args.verifier,
                 seed=args.seed,
                 verifier_client_factory=eval_config.verifier_client,
@@ -149,18 +149,23 @@ async def _run_benchmark(args, embed, chat, rerank) -> None:
         elif bm == "ragas":
             from eval.benchmarks.ragas_rag import run_benchmark
             from eval.pipeline.setup import ingest_corpus
-            if args.reset and not args.skip_setup:
+            if args.ragas_profile == "smoke" and args.reset and not args.skip_setup:
                 print("[reset] 清空旧评测数据（ES + Neo4j）…")
                 await teardown()
-            if not args.skip_setup:
+            if args.ragas_profile == "smoke" and not args.skip_setup:
                 print("[setup] 写入 RAGAS 评测语料…")
                 await ingest_corpus(embed)
             await run_benchmark(
                 embed, chat, rerank,
+                profile=args.ragas_profile,
                 sample=args.sample,
+                corpus_limit=args.ragas_corpus_limit,
                 top_k=args.top_k,
+                seed=args.seed,
+                skip_ingest=args.skip_setup,
+                keep_corpus=args.keep_corpus,
             )
-            if args.teardown:
+            if args.ragas_profile == "smoke" and args.teardown:
                 print("[teardown] 清理评测数据…")
                 await teardown()
         else:
@@ -211,15 +216,20 @@ def main() -> None:
     p.add_argument("--query-limit", type=int, default=100,
                    help="[cmteb-t2] query 数量上限（默认 100，全量约 2k 条）")
     p.add_argument("--keep-corpus", action="store_true",
-                   help="[cmteb-t2] 跑完保留 corpus（默认会清理）")
+                   help="[cmteb-t2/ragas] 跑完保留 corpus（默认会清理）")
     # hotpotqa 控制
-    p.add_argument("--sample", type=int, default=100,
-                   help="[hotpotqa] 采样题数（默认 100，分层 bridge/comparison；全量 dev 约 7400 题极重）")
+    p.add_argument("--sample", type=int,
+                   help="[hotpotqa/ragas] 覆盖 profile 的采样题数（HotpotQA 默认 100）")
     p.add_argument("--verifier", choices=["none", "same", "cross"], default="none",
                    help="[hotpotqa] Verifier 配置（等 ② Verifier Loop 完成后启用）")
-    p.add_argument("--seed", type=int, default=42, help="[hotpotqa] 采样种子")
+    p.add_argument("--seed", type=int, default=42, help="[hotpotqa/ragas] 采样种子")
     p.add_argument("--top-k", type=int, default=5,
                    help="[ragas] 送入答案生成与裁判的上下文数量（默认 5）")
+    p.add_argument("--ragas-profile", choices=["smoke", "standard", "rigorous"],
+                   default="standard",
+                   help="[ragas] smoke=本地12题；standard=CMRC 200题；rigorous=CMRC 500题")
+    p.add_argument("--ragas-corpus-limit", type=int,
+                   help="[ragas] 覆盖 profile 的封闭语料篇数（standard 默认1000）")
 
     asyncio.run(_run(p.parse_args()))
 

@@ -4,16 +4,23 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 import subprocess
 import sys
 import types
+import uuid
 from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
 from statistics import fmean
 from typing import Any
 
+from app.core.rag.chunker import chunk_parent_child
+from app.core.rag.es_index import CHUNK_TYPE_CHILD, CHUNK_TYPE_PARENT, CHUNKS_INDEX, ensure_index
+from app.core.rag.es_store import build_chunk_doc, bulk_index
+from app.db.elastic import get_es
 from eval import clients, eval_config, metrics as deterministic_metrics
+from eval.benchmarks.ragas_cmrc import load_cmrc
 from eval.eval_config import EVAL_USER_ID
 
 DATASET_PATH = Path(__file__).parents[1] / "fixtures" / "gold" / "ragas.json"
@@ -25,6 +32,12 @@ METRIC_NAMES = (
     "answer_relevancy",
     "factual_correctness",
 )
+CMRC_USER_ID = uuid.UUID("eee20000-0000-0000-0000-00000000c018")
+PROFILES = {
+    "smoke": {"sample": 12, "corpus": 10},
+    "standard": {"sample": 200, "corpus": 1000},
+    "rigorous": {"sample": 500, "corpus": 3000},
+}
 
 
 def load_dataset(path: Path = DATASET_PATH) -> list[dict]:
@@ -67,6 +80,26 @@ def _mean_scores(samples: list[dict]) -> dict[str, float | None]:
     return summary
 
 
+def _bootstrap_ci(samples: list[dict], section: str, names: tuple[str, ...] | list[str],
+                  seed: int, rounds: int = 2000) -> dict[str, dict | None]:
+    """对逐题分数做非参数 bootstrap，输出均值的 95% 置信区间。"""
+    rng = random.Random(seed)
+    output: dict[str, dict | None] = {}
+    for name in names:
+        values = [row[section].get(name) for row in samples if row[section].get(name) is not None]
+        if not values:
+            output[name] = None
+            continue
+        estimates = sorted(
+            fmean(rng.choice(values) for _ in range(len(values))) for _ in range(rounds)
+        )
+        output[name] = {
+            "low": round(estimates[int(rounds * 0.025)], 6),
+            "high": round(estimates[min(rounds - 1, int(rounds * 0.975))], 6),
+        }
+    return output
+
+
 def _git_sha() -> str | None:
     try:
         return subprocess.check_output(
@@ -78,6 +111,50 @@ def _git_sha() -> str | None:
 
 def _dataset_sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+async def _clear_cmrc() -> None:
+    es = get_es()
+    try:
+        await es.delete_by_query(
+            index=CHUNKS_INDEX,
+            body={"query": {"term": {"user_id": str(CMRC_USER_ID)}}},
+            refresh=True, conflicts="proceed",
+        )
+    except Exception as exc:
+        print(f"[RAGAS/CMRC] 清理 ES 失败（忽略）: {exc}")
+
+
+async def _ingest_cmrc(embed_client, corpus: list[dict], batch_size: int = 40) -> int:
+    """批量写入 CMRC 封闭语料，使用独立 user namespace，避免污染其他评测。"""
+    await ensure_index()
+    await _clear_cmrc()
+    uid = str(CMRC_USER_ID)
+    for start in range(0, len(corpus), batch_size):
+        batch = corpus[start:start + batch_size]
+        docs: list[dict] = []
+        children: list[tuple[str, dict, str]] = []
+        for item in batch:
+            for parent in chunk_parent_child(item["text"]):
+                parent_doc = build_chunk_doc(
+                    user_id=uid, source_type="document", source_id=item["source_id"],
+                    doc_name=item["source_id"], chunk_type=CHUNK_TYPE_PARENT,
+                    content=parent.content, vector=None,
+                )
+                docs.append(parent_doc)
+                for child in parent.children:
+                    children.append((child, parent_doc, item["source_id"]))
+        vectors = await embed_client.embed([row[0] for row in children])
+        for (text, parent_doc, source_id), vector in zip(children, vectors):
+            docs.append(build_chunk_doc(
+                user_id=uid, source_type="document", source_id=source_id,
+                doc_name=source_id, chunk_type=CHUNK_TYPE_CHILD, content=text,
+                vector=vector, parent_id=parent_doc["_id"],
+            ))
+        await bulk_index(docs)
+        done = min(start + batch_size, len(corpus))
+        print(f"    [RAGAS/CMRC] corpus {done}/{len(corpus)}")
+    return len(corpus)
 
 
 def _install_ragas_043_compat() -> None:
@@ -183,35 +260,64 @@ def _write_artifacts(samples: list[dict], manifest: dict, summary: dict) -> Path
     rows = [
         "# Comet RAGAS 评测报告", "",
         f"- 运行 ID：`{manifest['run_id']}`",
+        f"- 数据集：`{manifest['dataset']['dataset_id']}` / `{manifest['dataset']['split']}`",
+        f"- Profile：`{manifest['profile']}`",
         f"- 样本数：{manifest['sample_count']}",
+        f"- Corpus：{manifest['corpus_count']} 篇",
         f"- 数据集 SHA-256：`{manifest['dataset_sha256']}`",
         f"- 代码提交：`{manifest['git_sha'] or 'unknown'}`", "",
-        "| 指标 | 均值 |", "|---|---:|",
+        "| 指标 | 均值 | 95% CI |", "|---|---:|---:|",
     ]
     for name, score in summary["ragas"].items():
-        rows.append(f"| {name} | {'N/A' if score is None else f'{score:.4f}'} |")
-    rows += ["", "| 确定性检索指标 | 均值 |", "|---|---:|"]
+        ci = summary["confidence_intervals_95"]["ragas"].get(name)
+        ci_text = "N/A" if ci is None else f"[{ci['low']:.4f}, {ci['high']:.4f}]"
+        rows.append(f"| {name} | {'N/A' if score is None else f'{score:.4f}'} | {ci_text} |")
+    rows += ["", "| 确定性检索指标 | 均值 | 95% CI |", "|---|---:|---:|"]
     for name, score in summary["retrieval"].items():
-        rows.append(f"| {name} | {score:.4f} |")
-    rows += ["", f"失败的指标调用数：{summary['metric_error_count']}。",
+        ci = summary["confidence_intervals_95"]["retrieval"].get(name)
+        ci_text = "N/A" if ci is None else f"[{ci['low']:.4f}, {ci['high']:.4f}]"
+        rows.append(f"| {name} | {score:.4f} | {ci_text} |")
+    rows += ["", f"失败的指标调用数：{summary['metric_error_count']}"
+             f"（{summary['metric_error_rate']:.2%}）。",
              "逐样本证据、答案、分数及错误见 `samples.jsonl`。", ""]
     (run_dir / "report.md").write_text("\n".join(rows), encoding="utf-8")
     return run_dir
 
 
-async def run_benchmark(embed_client, chat_client, rerank_client=None,
-                        sample: int | None = None, top_k: int = 5) -> Path:
+async def run_benchmark(
+    embed_client, chat_client, rerank_client=None, *, profile: str = "standard",
+    sample: int | None = None, corpus_limit: int | None = None, top_k: int = 5,
+    seed: int = 42, skip_ingest: bool = False, keep_corpus: bool = False,
+) -> Path:
     os.environ.setdefault("RAGAS_DO_NOT_TRACK", "true")
     if top_k < 1:
         raise ValueError("--top-k 必须大于 0")
-    dataset = load_dataset()
-    if sample is not None:
-        if sample < 1:
-            raise ValueError("--sample 必须大于 0")
-        dataset = dataset[:sample]
+    if profile not in PROFILES:
+        raise ValueError(f"未知 RAGAS profile: {profile}")
+    profile_config = PROFILES[profile]
+    requested_sample = sample if sample is not None else profile_config["sample"]
+    requested_corpus = corpus_limit if corpus_limit is not None else profile_config["corpus"]
+    if profile == "smoke":
+        dataset = load_dataset()[:requested_sample]
+        uid = str(EVAL_USER_ID)
+        dataset_meta = {
+            "dataset_id": "comet/fixtures/ragas",
+            "split": "local",
+            "license": "repository license",
+            "prepared_sha256": _dataset_sha(DATASET_PATH),
+        }
+        corpus_count = 10
+    else:
+        print(f"[RAGAS/CMRC] 加载数据：sample={requested_sample}, corpus={requested_corpus}…")
+        dataset, corpus, dataset_meta = load_cmrc(
+            sample_size=requested_sample, corpus_limit=requested_corpus, seed=seed
+        )
+        uid = str(CMRC_USER_ID)
+        corpus_count = len(corpus)
+        if not skip_ingest:
+            await _ingest_cmrc(embed_client, corpus)
     metric_set, judge, judge_embed = _make_ragas_components()
     outputs: list[dict] = []
-    uid = str(EVAL_USER_ID)
     for index, item in enumerate(dataset, 1):
         print(f"    [RAGAS] {index}/{len(dataset)} {item['question'][:32]}…")
         selected = await clients.retrieve_hybrid_contexts(
@@ -245,21 +351,30 @@ async def run_benchmark(embed_client, chat_client, rerank_client=None,
             },
         })
     retrieval_names = list(outputs[0]["retrieval_scores"])
+    error_count = sum(len(x["errors"]) for x in outputs)
     summary = {
         "ragas": _mean_scores(outputs),
         "retrieval": {name: round(fmean(x["retrieval_scores"][name] for x in outputs), 6)
                       for name in retrieval_names},
-        "metric_error_count": sum(len(x["errors"]) for x in outputs),
+        "metric_error_count": error_count,
+        "metric_error_rate": round(error_count / (len(outputs) * len(METRIC_NAMES)), 6),
+    }
+    summary["confidence_intervals_95"] = {
+        "ragas": _bootstrap_ci(outputs, "scores", list(METRIC_NAMES), seed),
+        "retrieval": _bootstrap_ci(outputs, "retrieval_scores", retrieval_names, seed + 1),
     }
     now = datetime.now(timezone.utc)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": now.strftime("%Y%m%dT%H%M%S%fZ"),
         "created_at": now.isoformat(),
         "sample_count": len(outputs),
+        "corpus_count": corpus_count,
         "top_k": top_k,
-        "dataset": str(DATASET_PATH.relative_to(Path(__file__).parents[2])),
-        "dataset_sha256": _dataset_sha(DATASET_PATH),
+        "seed": seed,
+        "profile": profile,
+        "dataset": dataset_meta,
+        "dataset_sha256": dataset_meta["prepared_sha256"],
         "git_sha": _git_sha(),
         "ragas_version": version("ragas"),
         "generator_model": chat_client.model_name,
@@ -271,4 +386,7 @@ async def run_benchmark(embed_client, chat_client, rerank_client=None,
     run_dir = _write_artifacts(outputs, manifest, summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     print(f"RAGAS 报告目录：{run_dir}")
+    if profile != "smoke" and not keep_corpus:
+        print("[RAGAS/CMRC] 清理 corpus…")
+        await _clear_cmrc()
     return run_dir
