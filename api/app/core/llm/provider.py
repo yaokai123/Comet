@@ -21,7 +21,11 @@ PROVIDER_DEFAULT_BASE_URL: dict[str, str] = {
 
 
 async def test_connection(
-    type_: str, base_url: str, api_key: str, model_name: str
+    type_: str, base_url: str, api_key: str, model_name: str, *,
+    wire_api: str = "chat_completions",
+    default_headers: dict[str, str] | None = None,
+    reasoning_effort: str | None = None,
+    store_responses: bool = False,
 ) -> tuple[bool, str]:
     """实际调一次目标 API 验证可用性。返回 (是否成功, 中文提示)。"""
     if type_ == "websearch":
@@ -29,7 +33,7 @@ async def test_connection(
     if type_ == "asr":
         return _test_asr(base_url, model_name)
     base = base_url.rstrip("/")
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {"Authorization": f"Bearer {api_key}", **(default_headers or {})}
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             if type_ == "embedding":
@@ -51,6 +55,18 @@ async def test_connection(
                         "query": "ping",
                         "documents": ["doc"],
                     },
+                )
+            elif wire_api == "responses":
+                payload: dict = {
+                    "model": model_name,
+                    "input": "只回复 OK",
+                    "max_output_tokens": 16,
+                    "store": store_responses,
+                }
+                if reasoning_effort:
+                    payload["reasoning"] = {"effort": reasoning_effort}
+                resp = await client.post(
+                    f"{base}/responses", headers=headers, json=payload,
                 )
             else:
                 # chat / multimodal 都用 chat/completions 最小请求

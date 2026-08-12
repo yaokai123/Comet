@@ -1,4 +1,5 @@
 """根据用户的默认模型配置构建 LLMClient。"""
+import json
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,13 @@ _TYPE_LABEL = {
 }
 
 
+def _extra_headers(config) -> dict[str, str]:
+    if not config.extra_headers_encrypted:
+        return {}
+    value = json.loads(decrypt_secret(config.extra_headers_encrypted))
+    return {str(k): str(v) for k, v in value.items()}
+
+
 async def get_client_for_type(
     session: AsyncSession, user_id: uuid.UUID, type_: str
 ) -> LLMClient:
@@ -30,6 +38,10 @@ async def get_client_for_type(
         base_url=config.base_url,
         api_key=decrypt_secret(config.api_key_encrypted),
         model_name=config.model_name,
+        wire_api=config.wire_api or "chat_completions",
+        default_headers=_extra_headers(config),
+        reasoning_effort=config.reasoning_effort,
+        store_responses=bool(config.store_responses),
     )
 
 
@@ -45,4 +57,8 @@ async def get_optional_client_for_type(
         base_url=config.base_url,
         api_key=decrypt_secret(config.api_key_encrypted),
         model_name=config.model_name,
+        wire_api=config.wire_api or "chat_completions",
+        default_headers=_extra_headers(config),
+        reasoning_effort=config.reasoning_effort,
+        store_responses=bool(config.store_responses),
     )

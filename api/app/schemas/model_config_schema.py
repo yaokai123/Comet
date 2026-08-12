@@ -20,6 +20,10 @@ class ModelConfigCreate(BaseModel):
     base_url: str = Field(min_length=1, max_length=255)
     capability: list[str] = Field(default_factory=list)
     is_default: bool = False
+    wire_api: Literal["chat_completions", "responses"] = "chat_completions"
+    reasoning_effort: str | None = Field(default=None, max_length=16)
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+    store_responses: bool = False
 
 
 class ModelConfigUpdate(BaseModel):
@@ -29,6 +33,10 @@ class ModelConfigUpdate(BaseModel):
     api_key: str | None = None
     base_url: str | None = Field(default=None, max_length=255)
     capability: list[str] | None = None
+    wire_api: Literal["chat_completions", "responses"] | None = None
+    reasoning_effort: str | None = Field(default=None, max_length=16)
+    extra_headers: dict[str, str] | None = None
+    store_responses: bool | None = None
 
 
 class ModelConfigOut(BaseModel):
@@ -44,6 +52,10 @@ class ModelConfigOut(BaseModel):
     capability: list[str]
     is_default: bool
     created_at: datetime
+    wire_api: str = "chat_completions"
+    reasoning_effort: str | None = None
+    extra_header_names: list[str] = Field(default_factory=list)
+    store_responses: bool = False
 
 
 class ConnectionTestResult(BaseModel):

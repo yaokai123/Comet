@@ -125,14 +125,36 @@ def _finish_reason(data: dict) -> list[str]:
 class LLMClient:
     """一个 provider 配置对应一个 client（base_url + api_key + model）。"""
 
-    def __init__(self, base_url: str, api_key: str, model_name: str):
+    def __init__(
+        self, base_url: str, api_key: str, model_name: str, *,
+        wire_api: str = "chat_completions",
+        default_headers: dict[str, str] | None = None,
+        reasoning_effort: str | None = None,
+        store_responses: bool = False,
+    ):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model_name = model_name
+        self.wire_api = wire_api
+        self.default_headers = default_headers or {}
+        self.reasoning_effort = reasoning_effort
+        self.store_responses = store_responses
 
     @property
     def _headers(self) -> dict:
-        return {"Authorization": f"Bearer {self.api_key}"}
+        return {"Authorization": f"Bearer {self.api_key}", **self.default_headers}
+
+    @staticmethod
+    def _responses_text(data: dict) -> str:
+        if isinstance(data.get("output_text"), str):
+            return data["output_text"]
+        parts: list[str] = []
+        for item in data.get("output") or []:
+            for content in item.get("content") or []:
+                text = content.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
 
     async def embed(
         self, texts: list[str], dimensions: int | None = None
@@ -229,23 +251,41 @@ class LLMClient:
             sp.set_payload("messages_count", len(messages))
             if last_user:
                 sp.set_payload("request_summary", last_user[:600])
-            data = await _post_with_retry(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers,
-                json={
+            if self.wire_api == "responses":
+                payload: dict = {
                     "model": self.model_name,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                },
-                timeout=120,
-            )
+                    "input": messages,
+                    "max_output_tokens": max_tokens,
+                    "store": self.store_responses,
+                }
+                if self.reasoning_effort:
+                    payload["reasoning"] = {"effort": self.reasoning_effort}
+                data = await _post_with_retry(
+                    f"{self.base_url}/responses", headers=self._headers,
+                    json=payload, timeout=120,
+                )
+            else:
+                data = await _post_with_retry(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers,
+                    json={
+                        "model": self.model_name,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    },
+                    timeout=120,
+                )
             in_t, out_t, cached = _extract_usage(data)
             sp.set_tokens(input=in_t, output=out_t, cached=cached, model_name=self.model_name)
             reasons = _finish_reason(data)
             if reasons:
                 sp.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, reasons)
-            text = data["choices"][0]["message"]["content"]
+            text = (
+                self._responses_text(data)
+                if self.wire_api == "responses"
+                else data["choices"][0]["message"]["content"]
+            )
             if isinstance(text, str) and text:
                 sp.set_payload("response_preview", text[:600])
             return text

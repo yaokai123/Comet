@@ -1,4 +1,5 @@
 """模型配置业务服务：CRUD、连接测试、设默认。"""
+import json
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +45,13 @@ class ModelConfigService:
             base_url=body.base_url,
             capability=body.capability,
             is_default=body.is_default,
+            wire_api=body.wire_api,
+            reasoning_effort=body.reasoning_effort,
+            extra_headers_encrypted=(
+                encrypt_secret(json.dumps(body.extra_headers, ensure_ascii=False))
+                if body.extra_headers else None
+            ),
+            store_responses=body.store_responses,
         )
         # 设为默认则先清掉同类型旧默认
         if body.is_default:
@@ -72,6 +80,17 @@ class ModelConfigService:
             config.capability = body.capability
         if body.api_key:  # 非空才更新 key
             config.api_key_encrypted = encrypt_secret(body.api_key)
+        if body.wire_api is not None:
+            config.wire_api = body.wire_api
+        if body.reasoning_effort is not None:
+            config.reasoning_effort = body.reasoning_effort
+        if body.extra_headers is not None:
+            config.extra_headers_encrypted = (
+                encrypt_secret(json.dumps(body.extra_headers, ensure_ascii=False))
+                if body.extra_headers else None
+            )
+        if body.store_responses is not None:
+            config.store_responses = body.store_responses
         return await self.repo.save(config)
 
     async def delete(self, user_id: uuid.UUID, config_id: uuid.UUID) -> None:
@@ -95,7 +114,14 @@ class ModelConfigService:
         # websearch 按 provider 测试（base_url 字段对联网搜索无意义，传 provider）
         first_arg = config.provider if config.type == "websearch" else config.base_url
         ok, msg = await test_connection(
-            config.type, first_arg, api_key, config.model_name
+            config.type, first_arg, api_key, config.model_name,
+            wire_api=config.wire_api or "chat_completions",
+            default_headers=(
+                json.loads(decrypt_secret(config.extra_headers_encrypted))
+                if config.extra_headers_encrypted else None
+            ),
+            reasoning_effort=config.reasoning_effort,
+            store_responses=bool(config.store_responses),
         )
         logger.info(
             "模型连接测试: user=%s id=%s success=%s msg=%s",
@@ -109,6 +135,14 @@ class ModelConfigService:
     @staticmethod
     def to_out_dict(config: ModelConfig) -> dict:
         """转出参 dict，api_key 以掩码呈现。"""
+        header_names: list[str] = []
+        if config.extra_headers_encrypted:
+            try:
+                header_names = sorted(json.loads(
+                    decrypt_secret(config.extra_headers_encrypted)
+                ).keys())
+            except (ValueError, TypeError):
+                header_names = []
         return {
             "id": str(config.id),
             "type": config.type,
@@ -120,4 +154,8 @@ class ModelConfigService:
             "capability": config.capability,
             "is_default": config.is_default,
             "created_at": config.created_at.isoformat(),
+            "wire_api": config.wire_api or "chat_completions",
+            "reasoning_effort": config.reasoning_effort,
+            "extra_header_names": header_names,
+            "store_responses": bool(config.store_responses),
         }

@@ -3,6 +3,7 @@
 五个 provider（openai/qwen/doubao/deepseek/zhipu）均为 OpenAI 兼容协议，
 直接用 ChatOpenAI(base_url, api_key, model) 即可，无需为异构协议做动态代理。
 """
+import json
 import uuid
 
 from langchain_openai import ChatOpenAI
@@ -46,13 +47,25 @@ def build_chat_model(
     `stream_usage=True`:让流式响应在最后一个 chunk 带上 usage_metadata,
     供 ③ Tracing 抽取 input/output tokens 算 cost。不开启的话流式调用没法记 token。
     """
+    extra_headers: dict[str, str] = {}
+    if config.extra_headers_encrypted:
+        raw = json.loads(decrypt_secret(config.extra_headers_encrypted))
+        extra_headers = {str(k): str(v) for k, v in raw.items()}
+    use_responses = (config.wire_api or "chat_completions") == "responses"
     return ChatOpenAI(
         model=config.model_name,
         api_key=decrypt_secret(config.api_key_encrypted),
         base_url=config.base_url.rstrip("/"),
-        temperature=temperature,
+        temperature=None if use_responses else temperature,
         streaming=streaming,
         stream_usage=True,
+        default_headers=extra_headers or None,
+        use_responses_api=use_responses,
+        reasoning=(
+            {"effort": config.reasoning_effort}
+            if use_responses and config.reasoning_effort else None
+        ),
+        store=bool(config.store_responses),
     )
 
 
