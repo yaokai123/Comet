@@ -41,15 +41,16 @@ def _stratified_sample(rows: list[dict], n: int, seed: int) -> list[dict]:
     groups: dict[str, list[dict]] = {}
     for row in rows:
         groups.setdefault(_bucket(row), []).append(row)
-    allocation = {key: max(1, round(n * len(group) / len(rows)))
-                  for key, group in groups.items()}
-    # 调整四舍五入误差，保证严格返回 n 条。
-    while sum(allocation.values()) > n:
-        key = max((k for k in allocation if allocation[k] > 1),
-                  key=lambda k: allocation[k])
-        allocation[key] -= 1
-    while sum(allocation.values()) < n:
-        key = max(groups, key=lambda k: len(groups[k]) - allocation[k])
+    # Hamilton 最大余数法：允许极小样本下部分 strata 分配为 0，仍严格返回 n 条。
+    exact = {key: n * len(group) / len(rows) for key, group in groups.items()}
+    allocation = {key: int(value) for key, value in exact.items()}
+    remaining = n - sum(allocation.values())
+    ranked = sorted(
+        groups,
+        key=lambda key: (exact[key] - allocation[key], len(groups[key]), key),
+        reverse=True,
+    )
+    for key in ranked[:remaining]:
         allocation[key] += 1
     sampled: list[dict] = []
     for key in sorted(groups):

@@ -3,9 +3,11 @@
 设计：评测自带模型凭证 + 固定评测命名空间 EVAL_USER_ID（数据写它名下、可整体清理），
 从而完全自包含、可复现，不需要在系统里先建用户/配模型/灌数据。
 """
+import json
 import os
 import uuid
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -24,7 +26,18 @@ def _build(prefix: str) -> LLMClient | None:
     model = os.getenv(f"{prefix}_MODEL")
     if not (base and key and model):
         return None
-    return LLMClient(base_url=base, api_key=key, model_name=model)
+    raw_headers = os.getenv(f"{prefix}_HTTP_HEADERS_JSON", "").strip()
+    headers = json.loads(raw_headers) if raw_headers else {}
+    disable_storage = os.getenv(f"{prefix}_DISABLE_RESPONSE_STORAGE", "true").lower()
+    return LLMClient(
+        base_url=base,
+        api_key=key,
+        model_name=model,
+        wire_api=os.getenv(f"{prefix}_WIRE_API", "chat_completions"),
+        default_headers={str(k): str(v) for k, v in headers.items()},
+        reasoning_effort=os.getenv(f"{prefix}_REASONING_EFFORT") or None,
+        store_responses=disable_storage not in {"1", "true", "yes", "on"},
+    )
 
 
 def embed_client() -> LLMClient:
@@ -56,7 +69,7 @@ def verifier_client() -> LLMClient | None:
     return _build("EVAL_VERIFIER")
 
 
-def ragas_model_config(kind: str) -> dict[str, str]:
+def ragas_model_config(kind: str) -> dict[str, Any]:
     """读取独立 RAGAS judge/embedding 配置，未填时回退到现有评测模型。
 
     kind 为 JUDGE 或 EMBED。正式对外报告建议 judge 与生成模型使用不同模型家族，
@@ -68,7 +81,18 @@ def ragas_model_config(kind: str) -> dict[str, str]:
         "base_url": os.getenv(f"{prefix}_BASE_URL") or os.getenv(f"{fallback}_BASE_URL"),
         "api_key": os.getenv(f"{prefix}_KEY") or os.getenv(f"{fallback}_KEY"),
         "model": os.getenv(f"{prefix}_MODEL") or os.getenv(f"{fallback}_MODEL"),
+        "wire_api": (
+            os.getenv(f"{prefix}_WIRE_API")
+            or os.getenv(f"{fallback}_WIRE_API")
+            or "chat_completions"
+        ),
     }
     if not all(values.values()):
         raise RuntimeError(f"缺少 {prefix}_* 配置，且没有可用的 {fallback}_* 回退配置")
+    raw_headers = (
+        os.getenv(f"{prefix}_HTTP_HEADERS_JSON")
+        or os.getenv(f"{fallback}_HTTP_HEADERS_JSON")
+        or ""
+    ).strip()
+    values["default_headers"] = json.loads(raw_headers) if raw_headers else {}
     return values

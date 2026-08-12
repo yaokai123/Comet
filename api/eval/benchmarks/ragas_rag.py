@@ -1,6 +1,7 @@
 """RAGAS 0.4.x 端到端 RAG 评测：检索、回答、模型裁判与审计产物。"""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -179,7 +180,7 @@ def _install_ragas_043_compat() -> None:
 def _make_ragas_components():
     # 延迟导入：数据校验与单元测试不要求网络，也不会初始化第三方客户端。
     _install_ragas_043_compat()
-    from openai import AsyncOpenAI, OpenAI
+    from openai import AsyncOpenAI
     from ragas.embeddings import OpenAIEmbeddings
     from ragas.llms import llm_factory
     from ragas.metrics.collections import (
@@ -192,14 +193,26 @@ def _make_ragas_components():
 
     judge = eval_config.ragas_model_config("JUDGE")
     embed = eval_config.ragas_model_config("EMBED")
+    if judge["wire_api"] != "chat_completions":
+        raise RuntimeError(
+            "RAGAS 0.4.x 的 Instructor 裁判只支持 chat/completions；"
+            "请为 RAGAS_JUDGE_* 配置独立的 Chat Completions 模型"
+        )
     judge_llm = llm_factory(
         judge["model"], provider="openai",
-        client=AsyncOpenAI(api_key=judge["api_key"], base_url=judge["base_url"]),
+        client=AsyncOpenAI(
+            api_key=judge["api_key"], base_url=judge["base_url"],
+            default_headers=judge["default_headers"] or None,
+        ),
         temperature=0.0,
+        max_tokens=4096,
     )
     judge_embeddings = OpenAIEmbeddings(
         model=embed["model"],
-        client=OpenAI(api_key=embed["api_key"], base_url=embed["base_url"]),
+        client=AsyncOpenAI(
+            api_key=embed["api_key"], base_url=embed["base_url"],
+            default_headers=embed["default_headers"] or None,
+        ),
     )
     return {
         "context_precision": ContextPrecision(llm=judge_llm),
@@ -235,12 +248,20 @@ async def _evaluate_sample(metric_set: dict, question: str, response: str,
     }
     scores: dict[str, float | None] = {}
     errors: dict[str, str] = {}
-    for name, kwargs in calls.items():
+
+    async def run_metric(name: str, kwargs: dict) -> tuple[str, float | None, str | None]:
         try:
-            scores[name] = _score_value(await metric_set[name].ascore(**kwargs))
+            return name, _score_value(await metric_set[name].ascore(**kwargs)), None
         except Exception as exc:  # 单项失败仍需保存其他指标及可排查错误
-            scores[name] = None
-            errors[name] = f"{type(exc).__name__}: {exc}"
+            return name, None, f"{type(exc).__name__}: {exc}"
+
+    results = await asyncio.gather(*(
+        run_metric(name, kwargs) for name, kwargs in calls.items()
+    ))
+    for name, score, error in results:
+        scores[name] = score
+        if error:
+            errors[name] = error
     return scores, errors
 
 

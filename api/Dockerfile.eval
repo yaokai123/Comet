@@ -1,0 +1,8 @@
+FROM comet-main-api:latest
+
+# 评测代码和公共 fixtures 不进入生产镜像，只进入这个专用临时镜像。
+COPY eval /app/eval
+COPY scripts/run_ragas_personamem.py /app/scripts/run_ragas_personamem.py
+COPY app/core/llm/client.py /app/app/core/llm/client.py
+
+ENTRYPOINT ["python", "scripts/run_ragas_personamem.py"]

@@ -73,7 +73,9 @@ async def _post_with_retry(
             resp = await client.post(url, headers=headers, json=json, timeout=timeout)
             if resp.status_code in _RETRY_STATUS:
                 raise httpx.HTTPStatusError(
-                    f"可重试状态 {resp.status_code}", request=resp.request, response=resp
+                    f"可重试状态 {resp.status_code} ({url}): {resp.text[:500]}",
+                    request=resp.request,
+                    response=resp,
                 )
             resp.raise_for_status()
             return resp.json()
