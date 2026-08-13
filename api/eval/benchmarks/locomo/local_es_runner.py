@@ -69,15 +69,27 @@ async def _ingest(path: Path, embed_client, batch_size: int) -> dict:
 
 async def _run(args: argparse.Namespace) -> None:
     embed = eval_config.embed_client()
+    reranker = eval_config.rerank_client() if args.rerank else None
+    if args.rerank and reranker is None:
+        raise RuntimeError("--rerank requires EVAL_RERANK_* configuration")
     data = await _ingest(args.source, embed, args.batch_size)
 
     completed = 0
 
     async def retrieve(query: dict, top_k: int) -> list[str]:
         nonlocal completed
+        candidate_k = max(args.candidate_k, top_k)
         ranked = await clients.retrieve_hybrid(
-            embed, _user_id(query["sample_id"]), query["question"], max(20, top_k)
+            embed, _user_id(query["sample_id"]), query["question"], candidate_k
         )
+        if reranker is not None:
+            ranked = await clients.rerank_sources(
+                reranker,
+                _user_id(query["sample_id"]),
+                query["question"],
+                ranked[:candidate_k],
+                top_k,
+            )
         completed += 1
         if completed == 1 or completed % 25 == 0:
             print(f"[LoCoMo] query {completed}/{len(data['queries'])}", flush=True)
@@ -93,6 +105,9 @@ async def _run(args: argparse.Namespace) -> None:
             "run_id": run_id,
             "protocol": "LoCoMo official evidence, turn-level Comet hybrid retrieval",
             "embedding_model": embed.model_name,
+            "rerank_model": reranker.model_name if reranker else None,
+            "rerank_wire_api": reranker.wire_api if reranker else None,
+            "candidate_k": args.candidate_k,
             "top_k": args.top_k,
             "seed": None,
             "summary": summary,
@@ -114,6 +129,8 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, default=Path("eval/results/locomo"))
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--candidate-k", type=int, default=30)
+    parser.add_argument("--rerank", action="store_true")
     parser.add_argument("--keep-corpus", action="store_true")
     asyncio.run(_run(parser.parse_args()))
 

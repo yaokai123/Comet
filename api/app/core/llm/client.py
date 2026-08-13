@@ -60,7 +60,7 @@ async def close_llm_client() -> None:
 
 async def _post_with_retry(
     url: str, *, headers: dict, json: dict, timeout: float
-) -> dict:
+) -> dict | list:
     """带重试的 POST，返回解析后的 JSON。
 
     重试场景：httpx 传输异常（连接中断/读超时/对端关闭）与可重试的 HTTP 状态（429/5xx）。
@@ -97,14 +97,14 @@ async def _post_with_retry(
     raise last_exc if last_exc else RuntimeError("LLM 请求失败")
 
 
-def _extract_usage(data: dict) -> tuple[int, int, int]:
+def _extract_usage(data: dict | list) -> tuple[int, int, int]:
     """从 OpenAI 兼容响应里提取 (input, output, cached) tokens,缺省字段返回 0。
 
     覆盖:
     - chat/vision: usage.prompt_tokens / completion_tokens + prompt_tokens_details.cached_tokens
     - embedding:   usage.total_tokens / prompt_tokens(把 output 置 0)
     """
-    usage = data.get("usage") or {}
+    usage = data.get("usage") or {} if isinstance(data, dict) else {}
     input_tokens = (
         usage.get("prompt_tokens") or usage.get("input_tokens") or usage.get("total_tokens") or 0
     )
@@ -339,8 +339,15 @@ class LLMClient:
         self, query: str, documents: list[str], top_n: int | None = None
     ) -> list[tuple[int, float]]:
         """重排，返回 [(原始索引, 相关性分数), ...]，按分数降序。"""
-        payload = {"model": self.model_name, "query": query, "documents": documents}
-        if top_n:
+        if not documents:
+            return []
+        is_tei = self.wire_api == "tei"
+        payload = (
+            {"query": query, "texts": documents, "raw_scores": False}
+            if is_tei
+            else {"model": self.model_name, "query": query, "documents": documents}
+        )
+        if top_n and not is_tei:
             payload["top_n"] = top_n
         tracer = get_tracer()
         async with tracer.llm_span(
@@ -363,10 +370,16 @@ class LLMClient:
             if in_t == 0:
                 in_t = (len(query) + sum(len(d) for d in documents)) // 4
             sp.set_tokens(input=in_t, output=out_t, cached=cached, model_name=self.model_name)
-            results = data.get("results", [])
-            return [
-                (r["index"], r.get("relevance_score", 0.0))
-                for r in sorted(
-                    results, key=lambda x: x.get("relevance_score", 0.0), reverse=True
-                )
-            ]
+            if is_tei:
+                # TEI /rerank returns a JSON array with index/score. Some
+                # compatible releases wrap it in a `results` field, so accept
+                # both without weakening schema validation below.
+                results = data if isinstance(data, list) else data.get("results", [])
+                score_key = "score"
+            else:
+                results = data.get("results", [])
+                score_key = "relevance_score"
+            ranked = sorted(results, key=lambda x: x.get(score_key, 0.0), reverse=True)
+            if top_n:
+                ranked = ranked[:top_n]
+            return [(int(r["index"]), float(r.get(score_key, 0.0))) for r in ranked]

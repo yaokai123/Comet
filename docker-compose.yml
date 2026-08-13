@@ -60,6 +60,34 @@ services:
     volumes:
       - redis_data:/data
 
+  # Local multilingual cross-encoder. The host port is 8082 because the
+  # Ollama BGE-M3 embedding service already occupies 127.0.0.1:8081.
+  bge-reranker:
+    # TEI 1.9 requires CUDA 12.9. Pin 1.8 for the current NVIDIA 566.26
+    # driver (CUDA 12.7) while retaining the same /rerank API.
+    image: ghcr.io/huggingface/text-embeddings-inference:89-1.8
+    container_name: bge-reranker-v2-m3
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8082:80"
+    volumes:
+      - tei_reranker_data:/data
+    command:
+      - --model-id
+      - BAAI/bge-reranker-v2-m3
+      - --max-client-batch-size
+      - "32"
+      - --max-batch-tokens
+      - "16384"
+      - --auto-truncate
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
   # ============ 应用层 ============
   api:
     build: ./api
@@ -131,3 +159,4 @@ volumes:
   es_data:
   neo4j_data:
   redis_data:
+  tei_reranker_data:
