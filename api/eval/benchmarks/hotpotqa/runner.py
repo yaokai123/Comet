@@ -185,6 +185,26 @@ async def _answer(chat_client, question: str, paragraphs: list[tuple[str, str]])
     return _extract_answer(text)
 
 
+async def _answer_resilient(
+    chat_client, question: str, paragraphs: list[tuple[str, str]], *, attempts: int = 20,
+) -> str:
+    """Keep transient gateway failures out of benchmark accuracy metrics."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return await _answer(chat_client, question, paragraphs)
+        except Exception as exc:  # noqa: BLE001
+            if attempt == attempts:
+                raise
+            delay = min(15 * attempt, 120)
+            print(
+                f"    [hotpotqa] answer gateway failure {attempt}/{attempts}; "
+                f"retry in {delay}s: {exc!r}",
+                flush=True,
+            )
+            await asyncio.sleep(delay)
+    raise RuntimeError("unreachable")
+
+
 # ── 主流程 ──
 
 async def run_benchmark(
@@ -265,7 +285,7 @@ async def run_benchmark(
             retr_recall_list.append(retr_recall)
             print(f"    ✓ 检索 top-{K_RETRIEVE}: {rh} | 命中 gold={hits_in_topk} (Recall={retr_recall:.2f})")
             # 5. 让 chat 答
-            pred = await _answer(chat_client, q["question"], retrieved)
+            pred = await _answer_resilient(chat_client, q["question"], retrieved)
             em = _em(pred, q["answer"])
             f1 = _f1(pred, q["answer"])
             em_list.append(em)
