@@ -141,7 +141,7 @@ async def _run_benchmark(args, embed, chat, rerank) -> None:
             from eval.benchmarks.hotpotqa import run_benchmark
             await run_benchmark(
                 embed, chat, rerank,
-                sample=args.sample or 100,
+                sample=args.sample or 500,
                 verifier=args.verifier,
                 seed=args.seed,
                 verifier_client_factory=eval_config.verifier_client,
@@ -219,7 +219,7 @@ def main() -> None:
                    help="[cmteb-t2/ragas] 跑完保留 corpus（默认会清理）")
     # hotpotqa 控制
     p.add_argument("--sample", type=int,
-                   help="[hotpotqa/ragas] 覆盖 profile 的采样题数（HotpotQA 默认 100）")
+                   help="[hotpotqa/ragas] 覆盖 profile 的采样题数（HotpotQA 默认 500）")
     p.add_argument("--verifier", choices=["none", "same", "cross"], default="none",
                    help="[hotpotqa] Verifier 配置（等 ② Verifier Loop 完成后启用）")
     p.add_argument("--seed", type=int, default=42, help="[hotpotqa/ragas] 采样种子")

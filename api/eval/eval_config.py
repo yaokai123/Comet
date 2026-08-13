@@ -21,21 +21,32 @@ EVAL_USER_ID = uuid.UUID("eee00000-0000-0000-0000-0000000000ee")
 
 
 def _build(prefix: str) -> LLMClient | None:
-    base = os.getenv(f"{prefix}_BASE_URL")
-    key = os.getenv(f"{prefix}_KEY")
-    model = os.getenv(f"{prefix}_MODEL")
+    fallback_prefix = {
+        "EVAL_CHAT": "XIAOBA_LLM",
+        "EVAL_EMBED": "XIAOBA_MEMORY_EMBEDDING",
+    }.get(prefix)
+
+    def value(name: str, fallback_name: str | None = None) -> str | None:
+        configured = os.getenv(f"{prefix}_{name}")
+        if configured or not fallback_prefix:
+            return configured
+        return os.getenv(f"{fallback_prefix}_{fallback_name or name}")
+
+    base = value("BASE_URL", "API_BASE")
+    key = value("KEY", "API_KEY")
+    model = value("MODEL")
     if not (base and key and model):
         return None
-    raw_headers = os.getenv(f"{prefix}_HTTP_HEADERS_JSON", "").strip()
+    raw_headers = (value("HTTP_HEADERS_JSON") or "").strip()
     headers = json.loads(raw_headers) if raw_headers else {}
-    disable_storage = os.getenv(f"{prefix}_DISABLE_RESPONSE_STORAGE", "true").lower()
+    disable_storage = (value("DISABLE_RESPONSE_STORAGE") or "true").lower()
     return LLMClient(
         base_url=base,
         api_key=key,
         model_name=model,
-        wire_api=os.getenv(f"{prefix}_WIRE_API", "chat_completions"),
+        wire_api=value("WIRE_API") or "chat_completions",
         default_headers={str(k): str(v) for k, v in headers.items()},
-        reasoning_effort=os.getenv(f"{prefix}_REASONING_EFFORT") or None,
+        reasoning_effort=value("REASONING_EFFORT") or None,
         store_responses=disable_storage not in {"1", "true", "yes", "on"},
     )
 

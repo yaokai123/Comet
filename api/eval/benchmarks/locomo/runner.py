@@ -112,7 +112,10 @@ async def run_benchmark(
     output_dir: str | Path | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Load LoCoMo, call the real retriever per query, score, and optionally save JSON."""
-    data = load_locomo(path)
+    # The official file contains a handful of annotations referencing missing
+    # dialog ids. They are counted and dropped by the loader so formal runs
+    # remain auditable instead of failing after corpus ingestion.
+    data = load_locomo(path, strict=False)
     rankings: dict[str, Iterable[RetrievedItem]] = {}
     for query in data["queries"]:
         result = retriever(query, top_k)
