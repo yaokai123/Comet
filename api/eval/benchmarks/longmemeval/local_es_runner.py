@@ -22,6 +22,30 @@ def _user_id(question_id: str) -> str:
     return str(uuid.uuid5(_NAMESPACE, question_id))
 
 
+def _session_chunks(session: dict, max_chars: int = 6000) -> list[str]:
+    """Pack complete messages into bounded chunks, preserving session identity."""
+    chunks: list[str] = []
+    current: list[str] = []
+    length = 0
+    for message in session["messages"]:
+        content = str(message.get("content", "")).strip()
+        if not content:
+            continue
+        line = f"{message['role']}: {content}"
+        # Very long individual messages are split deterministically; this is a
+        # retrieval representation only and never changes the gold session ID.
+        pieces = [line[i:i + max_chars] for i in range(0, len(line), max_chars)]
+        for piece in pieces:
+            if current and length + len(piece) + 1 > max_chars:
+                chunks.append("\n".join(current))
+                current, length = [], 0
+            current.append(piece)
+            length += len(piece) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return [f"Date: {session['date']}\n{chunk}" for chunk in chunks]
+
+
 async def _clear(question_id: str) -> None:
     await get_es().delete_by_query(
         index=CHUNKS_INDEX,
@@ -34,11 +58,18 @@ async def _clear(question_id: str) -> None:
 async def _retrieve_question(question: dict, embed, top_k: int, batch_size: int) -> list[str]:
     question_id = question["question_id"]
     await _clear(question_id)
-    sessions = question["sessions"]
+    # The cleaned release has a few byte-identical repeated session IDs. Index
+    # each source once so those anomalies do not receive extra retrieval weight.
+    sessions = list({row["session_id"]: row for row in question["sessions"]}.values())
+    chunks = [
+        (session, text)
+        for session in sessions
+        for text in _session_chunks(session)
+    ]
     try:
-        for start in range(0, len(sessions), batch_size):
-            batch = sessions[start:start + batch_size]
-            texts = [f"Date: {row['date']}\n{row['text']}" for row in batch]
+        for start in range(0, len(chunks), batch_size):
+            batch = chunks[start:start + batch_size]
+            texts = [text for _, text in batch]
             vectors = await embed.embed(texts)
             docs = [
                 build_chunk_doc(
@@ -51,7 +82,7 @@ async def _retrieve_question(question: dict, embed, top_k: int, batch_size: int)
                     vector=vector,
                     tags=["longmemeval", question["question_type"]],
                 )
-                for row, text, vector in zip(batch, texts, vectors)
+                for (row, text), vector in zip(batch, vectors)
             ]
             await bulk_index(docs)
         return (

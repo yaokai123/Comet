@@ -3,6 +3,7 @@ import json
 import pytest
 
 from eval.benchmarks.longmemeval import evaluate_rankings, load_longmemeval
+from eval.benchmarks.longmemeval.local_es_runner import _session_chunks
 
 
 def _row(qid="q1"):
@@ -65,3 +66,15 @@ def test_loader_allows_identical_duplicate_session_and_audits_it(tmp_path):
     questions, manifest = load_longmemeval(path, expected_count=1)
     assert len(questions[0]["sessions"]) == 3
     assert manifest["duplicate_session_occurrences"] == 1
+
+
+def test_session_chunks_preserve_bound_and_drop_blank_messages():
+    session = {
+        "date": "2024/01/01",
+        "messages": [
+            {"role": "user", "content": "a" * 12},
+            {"role": "assistant", "content": ""},
+        ],
+    }
+    chunks = _session_chunks(session, max_chars=10)
+    assert chunks == ["Date: 2024/01/01\nuser: aaaa", "Date: 2024/01/01\naaaaaaaa"]
