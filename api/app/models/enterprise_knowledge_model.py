@@ -101,6 +101,36 @@ class KnowledgeSyncJob(Base):
     )
 
 
+class ConnectorDocumentBinding(Base):
+    """Stable identity mapping from a connector item to an internal document."""
+
+    __tablename__ = "connector_document_bindings"
+    __table_args__ = (
+        UniqueConstraint("connector_id", "external_id", name="uq_connector_external_item"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connector_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_connectors.id", ondelete="CASCADE"),
+        index=True,
+    )
+    external_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
+    source_version: Mapped[str] = mapped_column(String(256), nullable=False)
+    source_uri: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="active", index=True)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class WikiPage(Base):
     __tablename__ = "wiki_pages"
     __table_args__ = (UniqueConstraint("kb_id", "slug", name="uq_wiki_page_kb_slug"),)

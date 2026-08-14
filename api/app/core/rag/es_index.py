@@ -37,6 +37,8 @@ _MAPPING = {
             "block_ids": {"type": "keyword"},
             "region_ids": {"type": "keyword"},
             "logical_table_ids": {"type": "keyword"},
+            "artifact_paths": {"type": "keyword", "index": False},
+            "block_anchors": {"type": "object", "enabled": False},
             # content 用 IK 中文分词：写入 ik_max_word（细粒度），查询 ik_smart（粗粒度）
             "content": {
                 "type": "text",

@@ -151,4 +151,6 @@ def test_connector_sync_uses_versioned_idempotency_key():
     )
 
     assert batch.next_cursor.value == "new"
-    assert queue.items[0]["idempotency_key"] == "connector-1:manual-1:v2:upsert"
+    assert queue.items[0]["idempotency_key"].startswith(
+        "connector-1:manual-1:v2:upsert:"
+    )

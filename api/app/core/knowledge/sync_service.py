@@ -6,7 +6,12 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.knowledge.connectors import ConnectorCursor, KnowledgeConnector, synchronize_connector
+from app.core.knowledge.connectors import (
+    ConnectorCursor,
+    KnowledgeConnector,
+    SyncBatch,
+    synchronize_connector,
+)
 from app.core.knowledge.sql_queue import PostgresDurableQueue
 from app.models.enterprise_knowledge_model import KnowledgeConnectorRecord
 
@@ -21,7 +26,7 @@ class ConnectorSyncService:
         connector: KnowledgeConnector,
         *,
         limit: int = 100,
-    ) -> int:
+    ) -> SyncBatch:
         """Enqueue changes and advance the cursor in the same DB transaction."""
 
         queue = PostgresDurableQueue(self.session)
@@ -38,7 +43,7 @@ class ConnectorSyncService:
             record.status = "active"
             record.error_msg = None
             await self.session.flush()
-            return len(batch.changes)
+            return batch
         except Exception as exc:
             record.status = "error"
             record.error_msg = str(exc)[:2000]

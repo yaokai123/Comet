@@ -13,10 +13,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.models  # noqa: F401  确保所有 ORM 模型注册到 metadata
 from app.celery_app import celery_app
+from app.config import settings
 from app.core.llm.resolver import get_client_for_type, get_optional_client_for_type
 from app.core.logging import get_logger
 from app.core.task_lock import redis_task_lock
 from app.core.knowledge.adaptive_chunker import AdaptiveChunker, infer_plain_text_ir
+from app.core.knowledge.mineru_adapter import (
+    MinerUClient,
+    content_list_to_ir,
+    document_ir_json,
+)
 from app.core.rag.chunker import chunk_parent_child
 from app.core.rag.classifier import classify_content
 from app.core.rag.es_index import CHUNK_TYPE_CHILD, CHUNK_TYPE_PARENT
@@ -27,7 +33,7 @@ from app.core.rag.es_store import (
     update_tags_by_source,
 )
 from app.core.rag.parser import parse_document
-from app.core.storage import get_storage
+from app.core.storage import build_file_key, get_storage
 from app.db import elastic, redis
 from app.db.postgres import create_task_engine
 from app.models.document_model import (
@@ -109,8 +115,8 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
                 document_id=doc.id,
                 version_no=(latest_no or 0) + 1,
                 content_hash=content_hash,
-                parser_name="legacy",
-                parser_version="1",
+                parser_name=None,
+                parser_version=None,
                 status="parsing",
                 metadata_json={"generation": doc.generation},
             )
@@ -118,21 +124,56 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
             await session.flush()
         else:
             document_version.status = "parsing"
-        # 2. 解析为纯文本
-        text = parse_document(doc.file_ext, content)
-        if not text.strip():
-            raise ValueError("解析结果为空")
+        # 2. Parse into canonical IR. Configured PDFs use MinerU; all other
+        # formats keep the compatibility parser as a safe fallback.
+        document_ir = None
+        if doc.file_ext.lower() == ".pdf" and settings.mineru_endpoint:
+            try:
+                content_list, parser_version = await MinerUClient(
+                    settings.mineru_endpoint, settings.mineru_api_key
+                ).parse(doc.file_name, content)
+                document_ir = content_list_to_ir(
+                    content_list,
+                    document_id=document_id,
+                    version_id=str(document_version.id),
+                    title=doc.file_name,
+                    parser_version=parser_version,
+                )
+                document_version.parser_name = "mineru"
+                document_version.parser_version = parser_version
+                text = "\n\n".join(block.content for block in document_ir.ordered_blocks())
+            except Exception as exc:
+                if not settings.mineru_fallback_enabled:
+                    raise
+                logger.warning("MinerU failed; using legacy PDF parser: %s", exc)
+                document_version.metadata_json = {
+                    **(document_version.metadata_json or {}),
+                    "mineru_fallback": True,
+                    "mineru_error": str(exc)[:500],
+                }
+        if document_ir is None:
+            text = parse_document(doc.file_ext, content)
+            if not text.strip():
+                raise ValueError("解析结果为空")
+            document_ir = infer_plain_text_ir(
+                document_id=document_id,
+                version_id=str(document_version.id),
+                title=doc.file_name,
+                text=text,
+            )
+            document_version.parser_name = "legacy"
+            document_version.parser_version = "1"
+        if not document_ir.blocks:
+            raise ValueError("parser produced an empty Document IR")
+        ir_key = build_file_key(
+            str(doc.user_id), "document-ir", str(document_version.id), ".json"
+        )
+        await get_storage().save(ir_key, document_ir_json(document_ir))
+        document_version.ir_key = ir_key
         doc.progress = 0.3
         await repo.save(doc)
 
-        # 3. Analyze structure and select a chunking strategy. Parsers that still
-        # return text are converted to the canonical IR through a compatibility adapter.
-        document_ir = infer_plain_text_ir(
-            document_id=document_id,
-            version_id=str(document_version.id),
-            title=doc.file_name,
-            text=text,
-        )
+        # 3. Analyze structure and select a chunking strategy.
         adaptive_chunks, chunk_decision = AdaptiveChunker().chunk(document_ir)
         if not adaptive_chunks:
             raise ValueError("分块结果为空")
@@ -156,6 +197,8 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
                 "block_ids": list(adaptive.block_ids),
                 "region_ids": adaptive.metadata.get("region_ids", []),
                 "logical_table_ids": adaptive.metadata.get("logical_table_ids", []),
+                "artifact_paths": adaptive.metadata.get("artifact_paths", []),
+                "block_anchors": adaptive.metadata.get("block_anchors", []),
             }
             for parent in parents:
                 parent_doc = build_chunk_doc(

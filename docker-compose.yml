@@ -105,10 +105,12 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CONNECTOR_LOCAL_ROOTS: /connector-data
     ports:
       - "8000:8000"
     volumes:
       - ./api/storage:/app/storage
+      - ${CONNECTOR_LOCAL_PATH:-./connector-data}:/connector-data:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,7 +124,7 @@ services:
   worker:
     build: ./api
     container_name: comet-worker
-    command: celery -A app.celery_app.celery_app worker -l info -Q default,parse,memory,beat,research --pool=threads --concurrency=10
+    command: celery -A app.celery_app.celery_app worker -l info -Q default,parse,memory,beat,research,knowledge --pool=threads --concurrency=10
     env_file:
       - .env
     environment:
@@ -132,8 +134,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CONNECTOR_LOCAL_ROOTS: /connector-data
     volumes:
       - ./api/storage:/app/storage
+      - ${CONNECTOR_LOCAL_PATH:-./connector-data}:/connector-data:ro
     depends_on:
       - redis
       - api

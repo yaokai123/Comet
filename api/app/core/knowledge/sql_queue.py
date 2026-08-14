@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,8 +66,16 @@ class PostgresDurableQueue:
         statement = (
             select(KnowledgeSyncJob)
             .where(
-                KnowledgeSyncJob.status.in_(["pending", "retry"]),
-                KnowledgeSyncJob.available_at <= now,
+                or_(
+                    and_(
+                        KnowledgeSyncJob.status.in_(["pending", "retry"]),
+                        KnowledgeSyncJob.available_at <= now,
+                    ),
+                    and_(
+                        KnowledgeSyncJob.status == "leased",
+                        KnowledgeSyncJob.leased_until < now,
+                    ),
+                )
             )
             .order_by(KnowledgeSyncJob.available_at, KnowledgeSyncJob.created_at)
             .limit(limit)

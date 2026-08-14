@@ -14,7 +14,13 @@ from app.core.knowledge.quality_service import persist_quality_issues
 from app.core.knowledge.wiki import WikiEvidenceDraft, WikiPageDraft
 from app.core.logging import get_logger
 from app.db.postgres import create_task_engine
-from app.models.enterprise_knowledge_model import WikiEvidence, WikiLink, WikiPage, WikiPageVersion
+from app.models.enterprise_knowledge_model import (
+    DocumentVersion,
+    WikiEvidence,
+    WikiLink,
+    WikiPage,
+    WikiPageVersion,
+)
 from app.models.knowledge_base_model import KnowledgeBase
 
 logger = get_logger(__name__)
@@ -91,7 +97,46 @@ async def _inspect_kb(session: AsyncSession, kb_id) -> int:
         )
         for page in pages
     ]
-    issues = inspect_wiki(drafts)
+    source_versions: dict[str, str] = {}
+    evidence_versions: dict[str, str] = {}
+    cited_version_ids = {item.document_version_id for item in evidence}
+    if cited_version_ids:
+        cited_versions = list(
+            (
+                await session.scalars(
+                    select(DocumentVersion).where(DocumentVersion.id.in_(cited_version_ids))
+                )
+            ).all()
+        )
+        cited_by_id = {item.id: item for item in cited_versions}
+        document_ids = {item.document_id for item in cited_versions}
+        all_versions = list(
+            (
+                await session.scalars(
+                    select(DocumentVersion).where(
+                        DocumentVersion.document_id.in_(document_ids),
+                        DocumentVersion.status == "ready",
+                    )
+                )
+            ).all()
+        )
+        latest_by_document: dict = {}
+        for version in all_versions:
+            current = latest_by_document.get(version.document_id)
+            if current is None or version.version_no > current.version_no:
+                latest_by_document[version.document_id] = version
+        for item in evidence:
+            cited = cited_by_id.get(item.document_version_id)
+            if cited is None:
+                continue
+            latest = latest_by_document.get(cited.document_id, cited)
+            evidence_versions[item.chunk_id] = str(cited.id)
+            source_versions[item.chunk_id] = str(latest.id)
+    issues = inspect_wiki(
+        drafts,
+        source_versions=source_versions,
+        evidence_versions=evidence_versions,
+    )
     return await persist_quality_issues(session, kb_id=kb_id, issues=issues)
 
 

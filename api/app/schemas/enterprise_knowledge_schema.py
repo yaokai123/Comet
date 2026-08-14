@@ -24,3 +24,14 @@ class ConnectorCreate(BaseModel):
             names = ", ".join(sorted(offending))
             raise ValueError(f"connector secrets must use secret_ref, not config: {names}")
         return value
+
+
+class ConnectorUpdate(BaseModel):
+    status: str = Field(pattern="^(active|paused)$")
+
+
+class EnterpriseSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    top_k: int = Field(default=5, ge=1, le=50)
+    recall_size: int = Field(default=30, ge=5, le=200)
+    tags: list[str] | None = None

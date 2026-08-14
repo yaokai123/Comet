@@ -1,83 +1,61 @@
-"""混合检索：向量召回 + BM25 召回 → 加权融合 →（可选）rerank 重排。
+"""Observable six-stage enterprise retrieval with hybrid recall and exact evidence."""
 
-强制 user_id 过滤做多租户隔离。命中子块后返回其父块内容提供更大上下文。
-"""
+from __future__ import annotations
+
+import hashlib
 import uuid
+from dataclasses import asdict
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
+from app.core.knowledge.query_expansion import expand_query, normalize_query
+from app.core.knowledge.rag_pipeline import (
+    CallableStage,
+    StagedRAGPipeline,
+    reciprocal_rank_fusion,
+)
 from app.core.llm.resolver import get_client_for_type, get_optional_client_for_type
-from app.core.knowledge.rag_pipeline import reciprocal_rank_fusion
 from app.core.logging import get_logger
 from app.core.rag.es_index import CHUNK_TYPE_CHILD, CHUNK_TYPE_IMAGE, CHUNKS_INDEX
 from app.db.elastic import get_es
 
 logger = get_logger(__name__)
 
-# 融合权重
 _VECTOR_WEIGHT = 0.6
 _BM25_WEIGHT = 0.4
 
 
-def _normalize(scores: dict[str, float]) -> dict[str, float]:
-    if not scores:
-        return {}
-    vals = list(scores.values())
-    lo, hi = min(vals), max(vals)
-    if hi - lo < 1e-9:
-        return {k: 1.0 for k in scores}
-    return {k: (v - lo) / (hi - lo) for k, v in scores.items()}
-
-
-async def hybrid_search(
-    session: AsyncSession,
-    user_id: uuid.UUID,
-    query: str,
-    top_k: int = 5,
-    recall_size: int = 20,
-    tags: list[str] | None = None,
-    source_type: str | None = None,
-    min_vector_score: float | None = None,
-    kb_ids: list[str] | None = None,
-) -> list[dict]:
-    """混合检索，返回 top_k 个结果（含 content / doc_name / source_id / score）。
-
-    source_type 可选 document / image，在 ES 召回阶段就过滤，避免跨类型互相淹没。
-    文档检索命中 child 子块（再取父块上下文）；图片检索命中 image_desc 块。
-
-    kb_ids 不为空时限定只检索这些知识库的内容（对话时取"已启用检索"的库集合）。
-    传入空列表 [] 表示没有任何启用的库 → 直接返回空（不检索）。
-
-    min_vector_score 不为 None 时启用「绝对相关度门控」（精确导向，用于全局搜索）：
-    只保留 BM25 命中 或 向量原始余弦得分 ≥ 阈值的结果，丢弃不相关的最近邻噪声。
-    """
-    es = get_es()
-    uid = str(user_id)
-
-    # 文档用 child 子块；图片用 image_desc 块
+def _filters(state: dict[str, Any]) -> list[dict]:
+    source_type = state.get("source_type")
     if source_type == "image":
         chunk_types = [CHUNK_TYPE_IMAGE]
     elif source_type == "document":
         chunk_types = [CHUNK_TYPE_CHILD]
     else:
-        # 不限来源：同时检索文档子块和图片描述块
         chunk_types = [CHUNK_TYPE_CHILD, CHUNK_TYPE_IMAGE]
-
-    base_filter: list[dict] = [
-        {"term": {"user_id": uid}},
+    filters: list[dict] = [
+        {"term": {"user_id": str(state["user_id"])}},
         {"terms": {"chunk_type": chunk_types}},
     ]
-    if kb_ids is not None:
-        base_filter.append({"terms": {"kb_id": kb_ids}})
-    if tags:
-        base_filter.append({"terms": {"tags": tags}})
+    if state.get("kb_ids") is not None:
+        filters.append({"terms": {"kb_id": state["kb_ids"]}})
+    if state.get("tags"):
+        filters.append({"terms": {"tags": state["tags"]}})
     if source_type:
-        base_filter.append({"term": {"source_type": source_type}})
+        filters.append({"term": {"source_type": source_type}})
+    return filters
 
-    # 1. 向量召回
-    embed_client = await get_client_for_type(session, user_id, "embedding")
+
+async def _recall_query(state: dict[str, Any], query: str) -> dict[str, Any]:
+    session: AsyncSession = state["session"]
+    es = state["es"]
+    recall_size = int(state["recall_size"])
+    base_filter = _filters(state)
+    embed_client = await get_client_for_type(session, state["user_id"], "embedding")
     query_vector = await embed_client.embed_one(query)
-    knn_resp = await es.search(
+    knn_response = await es.search(
         index=CHUNKS_INDEX,
         body={
             "size": recall_size,
@@ -91,9 +69,7 @@ async def hybrid_search(
             },
         },
     )
-
-    # 2. BM25 召回
-    bm25_resp = await es.search(
+    bm25_response = await es.search(
         index=CHUNKS_INDEX,
         body={
             "size": recall_size,
@@ -112,101 +88,298 @@ async def hybrid_search(
             },
         },
     )
-
-    # 3. Collect rankings and fuse by rank. RRF keeps scores from heterogeneous
-    # retrievers comparable and avoids min-max instability on small candidate sets.
-    hits: dict[str, dict] = {}
-    vec_scores: dict[str, float] = {}
-    bm_scores: dict[str, float] = {}
-    for h in knn_resp["hits"]["hits"]:
-        hits[h["_id"]] = h["_source"]
-        vec_scores[h["_id"]] = h["_score"]
-    for h in bm25_resp["hits"]["hits"]:
-        hits[h["_id"]] = h["_source"]
-        bm_scores[h["_id"]] = h["_score"]
-
-    vector_ranking = [hit["_id"] for hit in knn_resp["hits"]["hits"]]
-    bm25_ranking = [hit["_id"] for hit in bm25_resp["hits"]["hits"]]
-    fused = dict(
-        reciprocal_rank_fusion(
-            {"vector": vector_ranking, "bm25": bm25_ranking},
-            weights={"vector": _VECTOR_WEIGHT, "bm25": _BM25_WEIGHT},
-            k=10,
-        )
+    sources: dict[str, dict] = {}
+    vector_scores: dict[str, float] = {}
+    bm25_scores: dict[str, float] = {}
+    vector_ranking: list[str] = []
+    bm25_ranking: list[str] = []
+    for hit in knn_response["hits"]["hits"]:
+        sources[hit["_id"]] = hit["_source"]
+        vector_scores[hit["_id"]] = float(hit["_score"])
+        vector_ranking.append(hit["_id"])
+    for hit in bm25_response["hits"]["hits"]:
+        sources[hit["_id"]] = hit["_source"]
+        bm25_scores[hit["_id"]] = float(hit["_score"])
+        bm25_ranking.append(hit["_id"])
+    fused = reciprocal_rank_fusion(
+        {"vector": vector_ranking, "bm25": bm25_ranking},
+        weights={"vector": _VECTOR_WEIGHT, "bm25": _BM25_WEIGHT},
+        k=10,
     )
+    return {
+        "sources": sources,
+        "ranking": [candidate_id for candidate_id, _ in fused],
+        "scores": dict(fused),
+        "vector_scores": vector_scores,
+        "bm25_scores": bm25_scores,
+    }
 
-    # 3.5 精确模式（全局搜索）：纯语义余弦门控
-    # ES cosine knn 的 _score = (1 + cos) / 2 → cos = 2*score - 1
-    # 只保留余弦 ≥ 阈值的结果，按余弦排序，分数用余弦；BM25 单字噪声不达标即丢弃
-    if min_vector_score is not None:
-        cos_scores = {cid: 2.0 * s - 1.0 for cid, s in vec_scores.items()}
-        kept = {cid: c for cid, c in cos_scores.items() if c >= min_vector_score}
-        if not kept:
-            return []
-        ranked = sorted(kept.items(), key=lambda x: x[1], reverse=True)
-        candidate_ids = [cid for cid, _ in ranked[:top_k]]
-        results: list[dict] = []
-        for cid in candidate_ids:
-            src = hits[cid]
-            content = await _resolve_parent_content(es, uid, src)
-            results.append(
-                {
-                    "chunk_id": cid,
-                    "content": content,
-                    "doc_name": src.get("doc_name"),
-                    "source_id": src.get("source_id"),
-                    "source_type": src.get("source_type"),
-                    "kb_id": src.get("kb_id"),
-                    "score": round(kept[cid], 4),
-                }
-            )
-        return results
 
-    ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)
-    candidate_ids = [cid for cid, _ in ranked[: max(top_k, recall_size)]]
+async def _question_understanding(state: dict[str, Any]) -> dict[str, Any]:
+    query = normalize_query(state["query"])
+    if not query:
+        raise ValueError("query must not be empty")
+    return {"normalized_query": query, "strategy": "whitespace_and_length_normalization"}
 
-    # 4. 可选 rerank（用户配了 rerank 模型才走）
-    rerank_client = await get_optional_client_for_type(session, user_id, "rerank")
-    if rerank_client and candidate_ids:
-        docs = [hits[cid].get("retrieval_text") or hits[cid]["content"] for cid in candidate_ids]
-        try:
-            reranked = await rerank_client.rerank(query, docs, top_n=len(candidate_ids))
-            rerank_ids = [candidate_ids[idx] for idx, _ in reranked]
-            rerank_fused = reciprocal_rank_fusion(
-                {"first_stage": candidate_ids, "reranker": rerank_ids},
-                weights={"first_stage": 1.0, "reranker": 6.0},
-                k=10,
-            )
-            candidate_ids = [candidate_id for candidate_id, _ in rerank_fused]
-            fused.update(dict(rerank_fused))
-        except Exception as e:
-            logger.warning("rerank 失败，回退加权融合排序: %s", e)
 
-    # 5. 取 top_k，返回父块内容（small-to-big）
-    results: list[dict] = []
-    for cid in candidate_ids[:top_k]:
-        src = hits[cid]
-        content = await _resolve_parent_content(es, uid, src)
-        results.append(
+async def _hybrid_recall(state: dict[str, Any]) -> dict[str, Any]:
+    recalled = await _recall_query(state, state["normalized_query"])
+    candidates = [
+        {
+            "id": candidate_id,
+            "source": recalled["sources"][candidate_id],
+            "score": recalled["scores"].get(candidate_id, 0.0),
+            "vector_score": recalled["vector_scores"].get(candidate_id),
+            "bm25_score": recalled["bm25_scores"].get(candidate_id),
+        }
+        for candidate_id in recalled["ranking"]
+    ]
+    return {"candidates": candidates, "initial_ranking": recalled["ranking"]}
+
+
+async def _query_expansion(state: dict[str, Any]) -> dict[str, Any]:
+    if (
+        not settings.knowledge_query_expansion_enabled
+        or not state["candidates"]
+        or state.get("min_vector_score") is not None
+    ):
+        return {"expanded_queries": [], "expanded_query_count": 0, "fallback": True}
+    client = await get_optional_client_for_type(state["session"], state["user_id"], "chat")
+    if client is None:
+        return {"expanded_queries": [], "expanded_query_count": 0, "fallback": True}
+    hints = [
+        candidate["source"].get("retrieval_text")
+        or candidate["source"].get("content", "")
+        for candidate in state["candidates"][:5]
+    ]
+    try:
+        queries = await expand_query(
+            client,
+            state["normalized_query"],
+            evidence_hints=hints,
+            limit=max(1, settings.knowledge_query_expansion_count),
+        )
+    except Exception as exc:
+        logger.warning("query expansion failed; keeping initial recall: %s", exc)
+        return {"expanded_queries": [], "expanded_query_count": 0, "fallback": True}
+    if not queries:
+        return {"expanded_queries": [], "expanded_query_count": 0, "fallback": True}
+
+    sources = {candidate["id"]: candidate["source"] for candidate in state["candidates"]}
+    vector_scores = {
+        candidate["id"]: candidate["vector_score"]
+        for candidate in state["candidates"]
+        if candidate.get("vector_score") is not None
+    }
+    bm25_scores = {
+        candidate["id"]: candidate["bm25_score"]
+        for candidate in state["candidates"]
+        if candidate.get("bm25_score") is not None
+    }
+    rankings = {"initial": state["initial_ranking"]}
+    weights = {"initial": 2.0}
+    for index, query in enumerate(queries):
+        recalled = await _recall_query(state, query)
+        sources.update(recalled["sources"])
+        for candidate_id, score in recalled["vector_scores"].items():
+            vector_scores[candidate_id] = max(vector_scores.get(candidate_id, score), score)
+        for candidate_id, score in recalled["bm25_scores"].items():
+            bm25_scores[candidate_id] = max(bm25_scores.get(candidate_id, score), score)
+        name = f"expansion_{index}"
+        rankings[name] = recalled["ranking"]
+        weights[name] = 1.0
+    fused = reciprocal_rank_fusion(rankings, weights=weights, k=10)
+    candidates = [
+        {
+            "id": candidate_id,
+            "source": sources[candidate_id],
+            "score": score,
+            "vector_score": vector_scores.get(candidate_id),
+            "bm25_score": bm25_scores.get(candidate_id),
+        }
+        for candidate_id, score in fused
+    ]
+    return {
+        "candidates": candidates,
+        "expanded_queries": queries,
+        "expanded_query_count": len(queries),
+        "model": client.model_name,
+        "fallback": False,
+    }
+
+
+async def _rerank(state: dict[str, Any]) -> dict[str, Any]:
+    candidates = list(state["candidates"])
+    threshold = state.get("min_vector_score")
+    if threshold is not None:
+        for candidate in candidates:
+            raw = candidate.get("vector_score")
+            candidate["score"] = 2.0 * raw - 1.0 if raw is not None else -1.0
+        candidates = [candidate for candidate in candidates if candidate["score"] >= threshold]
+        candidates.sort(key=lambda candidate: candidate["score"], reverse=True)
+        return {"candidates": candidates, "strategy": "absolute_cosine_threshold"}
+
+    client = await get_optional_client_for_type(state["session"], state["user_id"], "rerank")
+    if client is None or not candidates:
+        return {"candidates": candidates, "fallback": True}
+    documents = [
+        candidate["source"].get("retrieval_text")
+        or candidate["source"].get("content", "")
+        for candidate in candidates
+    ]
+    try:
+        reranked = await client.rerank(
+            state["normalized_query"], documents, top_n=len(candidates)
+        )
+    except Exception as exc:
+        logger.warning("rerank failed; keeping RRF ordering: %s", exc)
+        return {"candidates": candidates, "fallback": True}
+    rerank_ids = [candidates[index]["id"] for index, _ in reranked]
+    first_stage_ids = [candidate["id"] for candidate in candidates]
+    fused = reciprocal_rank_fusion(
+        {"first_stage": first_stage_ids, "reranker": rerank_ids},
+        weights={"first_stage": 1.0, "reranker": 6.0},
+        k=10,
+    )
+    by_id = {candidate["id"]: candidate for candidate in candidates}
+    output = []
+    for candidate_id, score in fused:
+        candidate = by_id[candidate_id]
+        candidate["score"] = score
+        output.append(candidate)
+    return {"candidates": output, "model": client.model_name, "fallback": False}
+
+
+async def _parent_expansion(state: dict[str, Any]) -> dict[str, Any]:
+    evidence: list[dict] = []
+    limit = max(int(state["top_k"]) * 3, int(state["top_k"]))
+    for candidate in state["candidates"][:limit]:
+        source = candidate["source"]
+        parent_source = await _resolve_parent_source(
+            state["es"], str(state["user_id"]), source
+        )
+        evidence.append(
             {
-                "chunk_id": cid,
-                "content": content,
-                "doc_name": src.get("doc_name"),
-                "source_id": src.get("source_id"),
-                "source_type": src.get("source_type"),
-                "kb_id": src.get("kb_id"),
-                "score": round(fused.get(cid, 0.0), 4),
+                "chunk_id": candidate["id"],
+                "child_chunk_ids": [candidate["id"]],
+                "parent_id": source.get("parent_id"),
+                "content": parent_source.get("content") or source.get("content", ""),
+                "doc_name": source.get("doc_name"),
+                "source_id": source.get("source_id"),
+                "source_type": source.get("source_type"),
+                "kb_id": source.get("kb_id"),
+                "document_version_id": source.get("document_version_id"),
+                "block_ids": source.get("block_ids", []),
+                "block_anchors": source.get("block_anchors", []),
+                "page_start": source.get("page_start"),
+                "page_end": source.get("page_end"),
+                "region_ids": source.get("region_ids", []),
+                "logical_table_ids": source.get("logical_table_ids", []),
+                "artifact_paths": source.get("artifact_paths", []),
+                "element_types": source.get("element_types", []),
+                "score": round(float(candidate["score"]), 6),
             }
         )
-    return results
+    return {"evidence": evidence}
 
 
-async def _resolve_parent_content(es, user_id: str, child_src: dict) -> str:
-    """命中子块时取其父块内容，提供更大上下文；取不到则用子块本身。"""
-    parent_id = child_src.get("parent_id")
+async def _evidence_merge(state: dict[str, Any]) -> dict[str, Any]:
+    merged: list[dict] = []
+    positions: dict[str, int] = {}
+    for item in state["evidence"]:
+        key = item.get("parent_id") or hashlib.sha256(
+            f"{item.get('source_id')}:{item.get('content')}".encode("utf-8")
+        ).hexdigest()
+        if key not in positions:
+            positions[key] = len(merged)
+            merged.append(item)
+            continue
+        existing = merged[positions[key]]
+        existing["child_chunk_ids"] = list(
+            dict.fromkeys(existing["child_chunk_ids"] + item["child_chunk_ids"])
+        )
+        existing["block_ids"] = list(
+            dict.fromkeys(existing.get("block_ids", []) + item.get("block_ids", []))
+        )
+        existing["score"] = max(existing["score"], item["score"])
+    merged.sort(key=lambda item: item["score"], reverse=True)
+    return {"evidence": merged[: int(state["top_k"])]}
+
+
+async def enterprise_search(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    query: str,
+    *,
+    top_k: int = 5,
+    recall_size: int = 20,
+    tags: list[str] | None = None,
+    source_type: str | None = None,
+    min_vector_score: float | None = None,
+    kb_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    if kb_ids == []:
+        return {"trace_id": uuid.uuid4().hex, "results": [], "observations": []}
+    stages = [
+        CallableStage("question_understanding", _question_understanding, "RuleQuestionUnderstanding"),
+        CallableStage("hybrid_recall", _hybrid_recall, "BGEAndBM25Recall"),
+        CallableStage("query_expansion", _query_expansion, "RetrievalGuidedLLMExpansion"),
+        CallableStage("rerank", _rerank, "RRFProtectedReranker"),
+        CallableStage("parent_expansion", _parent_expansion, "SmallToBigParentExpansion"),
+        CallableStage("evidence_merge", _evidence_merge, "VersionedEvidenceMerge"),
+    ]
+    execution = await StagedRAGPipeline(stages).execute(
+        query,
+        initial_state={
+            "session": session,
+            "user_id": user_id,
+            "es": get_es(),
+            "top_k": max(1, min(top_k, 50)),
+            "recall_size": max(top_k, min(recall_size, 200)),
+            "tags": tags,
+            "source_type": source_type,
+            "min_vector_score": min_vector_score,
+            "kb_ids": kb_ids,
+        },
+    )
+    return {
+        "trace_id": execution.trace_id,
+        "results": execution.state.get("evidence", []),
+        "expanded_queries": execution.state.get("expanded_queries", []),
+        "observations": [asdict(observation) for observation in execution.observations],
+    }
+
+
+async def hybrid_search(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    query: str,
+    top_k: int = 5,
+    recall_size: int = 20,
+    tags: list[str] | None = None,
+    source_type: str | None = None,
+    min_vector_score: float | None = None,
+    kb_ids: list[str] | None = None,
+) -> list[dict]:
+    execution = await enterprise_search(
+        session,
+        user_id,
+        query,
+        top_k=top_k,
+        recall_size=recall_size,
+        tags=tags,
+        source_type=source_type,
+        min_vector_score=min_vector_score,
+        kb_ids=kb_ids,
+    )
+    return execution["results"]
+
+
+async def _resolve_parent_source(es, user_id: str, child_source: dict) -> dict:
+    parent_id = child_source.get("parent_id")
     if not parent_id:
-        return child_src.get("content", "")
-    resp = await es.search(
+        return child_source
+    response = await es.search(
         index=CHUNKS_INDEX,
         body={
             "size": 1,
@@ -220,7 +393,11 @@ async def _resolve_parent_content(es, user_id: str, child_src: dict) -> str:
             },
         },
     )
-    docs = resp["hits"]["hits"]
-    if docs:
-        return docs[0]["_source"].get("content", "")
-    return child_src.get("content", "")
+    hits = response["hits"]["hits"]
+    return hits[0]["_source"] if hits else child_source
+
+
+async def _resolve_parent_content(es, user_id: str, child_src: dict) -> str:
+    """Compatibility helper retained for callers and focused tests."""
+    source = await _resolve_parent_source(es, user_id, child_src)
+    return source.get("content", "")

@@ -81,6 +81,17 @@ class Settings(BaseSettings):
 
     # 知识库 RAG
     embedding_dims: int = 1024  # 向量维度，ES 索引与 embed 调用统一用此值
+    connector_local_roots: str = ""  # comma-separated allowlist; empty disables local-folder
+    connector_sync_interval_seconds: int = 900
+    connector_max_file_bytes: int = 50 * 1024 * 1024
+    knowledge_query_expansion_enabled: bool = True
+    knowledge_query_expansion_count: int = 3
+    mineru_endpoint: str = ""  # full HTTP endpoint returning content_list JSON
+    mineru_api_key: str = ""
+    mineru_timeout_seconds: int = 300
+    mineru_fallback_enabled: bool = True
+    auto_wiki_max_chunks: int = 5000
+    auto_wiki_max_pages: int = 200
 
     # 全局搜索语义门控（精确导向）：只展示余弦相似度 ≥ 阈值的结果，没有就不展示
     # 阈值为真实余弦相似度（-1~1），按实测可调；偏高更精准、偏低召回更多

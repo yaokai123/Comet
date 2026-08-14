@@ -75,7 +75,7 @@ services:
   worker:
     restart: unless-stopped
     # 4G 内存：并发调小，避免多任务同时跑 LLM 撑爆内存
-    command: celery -A app.celery_app.celery_app worker -l info -Q default,parse,memory,beat,research --pool=threads --concurrency=3
+    command: celery -A app.celery_app.celery_app worker -l info -Q default,parse,memory,beat,research,knowledge --pool=threads --concurrency=3
     deploy:
       resources:
         limits:

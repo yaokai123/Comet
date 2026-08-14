@@ -129,3 +129,56 @@ Recommended rollout:
 
 Do not remove the existing `comet_chunks` index during rollout. The schema
 extension is additive and the current API remains compatible.
+
+## Phase 2 production vertical slice
+
+Phase 2 turns the extension contracts into runnable product flows:
+
+- `local_folder` and `web_pages` connectors produce cursor-based changes;
+- `connector_document_bindings` keeps one stable internal document identity per
+  external item, including across retries and updates;
+- Celery Beat polls connectors and a dedicated `knowledge` queue consumes durable
+  jobs; expired leases are reclaimed automatically;
+- configured PDFs are posted to `MINERU_ENDPOINT`, mapped directly from
+  `content_list` to `DocumentIR`, and the exact IR JSON is retained in storage;
+- production search executes all six RAG stages and returns stage implementation,
+  latency, candidate counts, fallback state and exact versioned evidence;
+- Auto-Wiki is an explicit user action. It uses the configured chat model for
+  extraction when available and the deterministic heuristic extractor otherwise;
+- the knowledge-base detail screen exposes connector operations, Wiki evidence,
+  quality findings and retrieval traces.
+
+Apply both enterprise migrations before starting the Phase 2 workers:
+
+```powershell
+cd api
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+For Docker local-folder synchronization, set `CONNECTOR_LOCAL_PATH` to a host
+directory. Compose mounts it read-only at `/connector-data`, and the application
+allowlist is fixed to that container path. Never mount a host filesystem root.
+
+MinerU is optional. `MINERU_ENDPOINT` must be the complete HTTP parse endpoint,
+accept multipart form field `file`, and return either a top-level content list or
+an object containing `data.content_list`, `content_list`, or `content_list_v2`.
+If it is empty, existing PDF parsing remains active. If a configured MinerU
+request fails, `MINERU_FALLBACK_ENABLED=true` automatically degrades to the
+existing parser and records the failure reason on the document version.
+
+Query expansion is enabled by default but calls the user's configured chat model
+only when a model exists. Parsing or provider failures preserve the initial
+hybrid recall. Auto-Wiki is never scheduled automatically, because an LLM-backed
+build can incur cost.
+
+Operational endpoints live under:
+
+```text
+/api/enterprise/knowledge-bases/{kb_id}/overview
+/api/enterprise/knowledge-bases/{kb_id}/connectors
+/api/enterprise/knowledge-bases/{kb_id}/connectors/{connector_id}/sync
+/api/enterprise/knowledge-bases/{kb_id}/search
+/api/enterprise/knowledge-bases/{kb_id}/wiki/build
+/api/enterprise/knowledge-bases/{kb_id}/wiki/pages/{page_id}
+/api/enterprise/knowledge-bases/{kb_id}/quality-issues
+```

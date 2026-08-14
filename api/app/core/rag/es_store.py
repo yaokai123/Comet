@@ -33,6 +33,8 @@ def build_chunk_doc(
     block_ids: list[str] | None = None,
     region_ids: list[str] | None = None,
     logical_table_ids: list[str] | None = None,
+    artifact_paths: list[str] | None = None,
+    block_anchors: list[dict] | None = None,
 ) -> dict:
     """构造一条 ES chunk 文档。"""
     chunk_id = uuid.uuid4().hex
@@ -59,6 +61,8 @@ def build_chunk_doc(
             "block_ids": block_ids or [],
             "region_ids": region_ids or [],
             "logical_table_ids": logical_table_ids or [],
+            "artifact_paths": artifact_paths or [],
+            "block_anchors": block_anchors or [],
             "tags": tags or [],
             "vector": vector,
             "created_at": datetime.now(timezone.utc).isoformat(),

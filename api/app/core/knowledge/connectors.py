@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -62,8 +63,16 @@ async def synchronize_connector(
     limit: int = 100,
 ) -> SyncBatch:
     batch = await connector.pull(cursor, limit=limit)
+    transition = hashlib.sha256(
+        f"{cursor.value or ''}->{batch.next_cursor.value or ''}".encode("utf-8")
+    ).hexdigest()[:20]
     for change in batch.changes:
-        key = f"{connector_id}:{change.external_id}:{change.version}:{change.kind.value}"
+        # Cursor transition distinguishes delete/re-create cycles with identical
+        # content while remaining deterministic when the same transaction retries.
+        key = (
+            f"{connector_id}:{change.external_id}:{change.version}:"
+            f"{change.kind.value}:{transition}"
+        )
         await queue.enqueue(
             connector_id=connector_id,
             change=change,

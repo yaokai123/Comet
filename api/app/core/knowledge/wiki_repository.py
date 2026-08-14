@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 
@@ -51,7 +52,20 @@ class WikiRepository:
                 page.status = "active"
             pages_by_slug[draft.slug] = page
 
-            content_hash = hashlib.sha256(draft.summary.encode("utf-8")).hexdigest()
+            provenance = [
+                {
+                    "chunk_id": item.chunk_id,
+                    "quote_hash": item.quote_hash,
+                    "page_start": item.page_start,
+                    "page_end": item.page_end,
+                }
+                for item in draft.evidence
+            ]
+            version_payload = draft.summary + "\n" + json.dumps(
+                provenance, ensure_ascii=False, sort_keys=True
+            )
+            # A Wiki version changes when either prose or exact provenance changes.
+            content_hash = hashlib.sha256(version_payload.encode("utf-8")).hexdigest()
             latest = await self.session.scalar(
                 select(WikiPageVersion)
                 .where(WikiPageVersion.page_id == page.id)

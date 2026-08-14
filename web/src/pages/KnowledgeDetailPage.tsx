@@ -32,6 +32,7 @@ import { knowledgeBaseApi, type KnowledgeBase } from '@/api/knowledgeBases'
 import { AuthenticatedImage } from '@/components/AuthenticatedImage'
 import MarkdownMessage from '@/components/MarkdownMessage'
 import { FileTypeIcon, StatusTag, formatSize } from './knowledge/helpers'
+import EnterpriseKnowledgePanel from '@/components/knowledge/EnterpriseKnowledgePanel'
 
 const { Dragger } = Upload
 const { Search } = Input
@@ -47,7 +48,7 @@ export default function KnowledgeDetailPage() {
   const { kbId = '' } = useParams()
   const navigate = useNavigate()
   const [kb, setKb] = useState<KnowledgeBase | null>(null)
-  const [tab, setTab] = useState<'doc' | 'image'>('doc')
+  const [tab, setTab] = useState<'doc' | 'image' | 'enterprise'>('doc')
 
   useEffect(() => {
     if (!kbId) return
@@ -85,10 +86,15 @@ export default function KnowledgeDetailPage() {
 
       <Tabs
         activeKey={tab}
-        onChange={(k) => setTab(k as 'doc' | 'image')}
+        onChange={(k) => setTab(k as 'doc' | 'image' | 'enterprise')}
         items={[
           { key: 'doc', label: '文档', children: <DocTab kbId={kbId} /> },
           { key: 'image', label: '图片', children: <ImageTab kbId={kbId} /> },
+          {
+            key: 'enterprise',
+            label: '企业治理',
+            children: <EnterpriseKnowledgePanel kbId={kbId} />,
+          },
         ]}
       />
     </div>

@@ -246,6 +246,17 @@ class AdaptiveChunker:
                                 block.logical_table_id for block in group if block.logical_table_id
                             )
                         ),
+                        "artifact_paths": list(
+                            dict.fromkeys(block.image_path for block in group if block.image_path)
+                        ),
+                        "block_anchors": [
+                            {
+                                "block_id": block.block_id,
+                                "page": block.anchor.page,
+                                "bbox": list(block.anchor.bbox) if block.anchor.bbox else None,
+                            }
+                            for block in group
+                        ],
                     },
                 )
             )

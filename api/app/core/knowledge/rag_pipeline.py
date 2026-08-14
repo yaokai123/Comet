@@ -53,6 +53,7 @@ StageCallable = Callable[[dict[str, Any]], dict[str, Any] | Awaitable[dict[str, 
 class CallableStage:
     name: str
     handler: StageCallable
+    implementation: str | None = None
 
     async def run(self, state: dict[str, Any]) -> dict[str, Any]:
         result = self.handler(state)
@@ -94,7 +95,10 @@ class StagedRAGPipeline:
                 observations.append(
                     StageObservation(
                         stage=stage.name,
-                        implementation=stage.__class__.__name__,
+                        implementation=(
+                            getattr(stage, "implementation", None)
+                            or stage.__class__.__name__
+                        ),
                         started_at_ms=started_at_ms,
                         duration_ms=round((time.perf_counter() - started) * 1000, 3),
                         input_count=before_count,
@@ -107,7 +111,10 @@ class StagedRAGPipeline:
                 observations.append(
                     StageObservation(
                         stage=stage.name,
-                        implementation=stage.__class__.__name__,
+                        implementation=(
+                            getattr(stage, "implementation", None)
+                            or stage.__class__.__name__
+                        ),
                         started_at_ms=started_at_ms,
                         duration_ms=round((time.perf_counter() - started) * 1000, 3),
                         input_count=before_count,

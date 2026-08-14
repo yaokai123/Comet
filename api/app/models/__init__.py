@@ -13,6 +13,7 @@ from app.models.daily_review_model import DailyReview
 from app.models.document_model import Document
 from app.models.document_index_job_model import DocumentIndexJob
 from app.models.enterprise_knowledge_model import (
+    ConnectorDocumentBinding,
     DocumentVersion,
     KnowledgeConnectorRecord,
     KnowledgeQualityIssue,
@@ -55,6 +56,7 @@ __all__ = [
     "Conversation",
     "Message",
     "ConversationShare",
+    "ConnectorDocumentBinding",
     "DailyReview",
     "Document",
     "DocumentIndexJob",
