@@ -77,6 +77,10 @@ services:
       - BAAI/bge-reranker-v2-m3
       - --max-client-batch-size
       - "32"
+      - --tokenization-workers
+      - "4"
+      - --max-concurrent-requests
+      - "32"
       - --max-batch-tokens
       - "16384"
       - --auto-truncate
