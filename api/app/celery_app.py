@@ -28,6 +28,7 @@ celery_app = Celery(
         "app.tasks.knowledge_maintenance",
         "app.tasks.knowledge_sync",
         "app.tasks.knowledge_wiki",
+        "app.tasks.stream_maintenance",
     ],
 )
 
@@ -51,6 +52,7 @@ celery_app.conf.update(
         "app.tasks.knowledge_sync.schedule": {"queue": "beat"},
         "app.tasks.knowledge_sync.consume": {"queue": "knowledge"},
         "app.tasks.knowledge_wiki.*": {"queue": "knowledge"},
+        "app.tasks.stream_maintenance.*": {"queue": "beat"},
         # 调度心跳留 beat 队列（轻量）；研究执行进独立 research 队列，避免长任务堵死心跳
         "app.tasks.agent_task.heartbeat": {"queue": "beat"},
         "app.tasks.agent_task.run": {"queue": "research"},
@@ -69,6 +71,10 @@ celery_app.conf.update(
         "enterprise-connector-consume": {
             "task": "app.tasks.knowledge_sync.consume",
             "schedule": crontab(minute="*"),
+        },
+        "durable-stream-retention": {
+            "task": "app.tasks.stream_maintenance.cleanup",
+            "schedule": crontab(minute=35),
         },
         "agent-task-heartbeat": {
             "task": "app.tasks.agent_task.heartbeat",

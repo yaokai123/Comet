@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.agent.orchestrator import run_function_calling, run_react
 from app.core.agent.tools import build_enabled_tools
 from app.core.agent.tracing import get_tracer
-from app.core.realtime import bus
+from app.core.realtime import durable_stream
 from app.core.llm.chat_model import (
     build_chat_model,
     build_default_chat_model,
@@ -50,8 +50,8 @@ MAX_HISTORY_TURNS = 20
 
 # 后台生成任务引用集合（防止 create_task 的任务被 GC 提前回收）
 _BG_TASKS: set = set()
-# 单次写流式缓冲的最小 token 间隔（攒够 N 个 token 才刷一次 Redis，降低写频）
-_BUFFER_FLUSH_EVERY = 8
+# 持久化 token 先聚合成小文本块，兼顾流式延迟与 PostgreSQL 写放大。
+_DURABLE_TOKEN_CHARS = 48
 
 
 # ── 主动召回优化：用户级温热缓存（始终注入 + 后台刷新）──────────────
@@ -375,19 +375,12 @@ class ChatService:
     async def stream_chat(
         self, user_id: uuid.UUID, body: ChatStreamRequest, skip_user_message: bool = False
     ) -> AsyncGenerator[str, None]:
-        """SSE 流式问答（触发 + 转发模型）。
-
-        生成动作不再跑在本 SSE 连接里，而是派一个独立 session 的后台任务生成（_run_chat_turn_bg），
-        通过 Redis 频道广播 token；本连接只「订阅频道并转发」给当前客户端。这样客户端中途断开
-        （切页面/关标签）只会停止转发，后台生成照常跑完并落库——回来重拉历史能看到完整回复，
-        生成中重连还能续传（见 resume_events）。
-        """
+        """启动后台问答，并从 PostgreSQL 事件日志转发可恢复的 SSE。"""
         user_text = body.message.strip()
-        # 前置 PG 工作（建会话 + 落 user 消息）用「用完即关」的独立 session，
-        # 避免请求依赖 session 在整个转发期间被挂着——转发只用 Redis，不占 PG 连接，
-        # 客户端断开也不会留下未归还的连接（修 GC 回收连接告警）。
         attachments = [
-            {"file_name": a.file_name, "text": a.text} for a in body.attachments if a.text
+            {"file_name": a.file_name, "text": a.text}
+            for a in body.attachments
+            if a.text
         ]
         try:
             async with SessionLocal() as session:
@@ -396,8 +389,6 @@ class ChatService:
                 cid = str(conv.id)
                 title = conv.title
                 if not skip_user_message:
-                    # AI 主动开场白（今日回顾「聊聊」）：仅新会话首轮，先把开场白作为
-                    # assistant 消息落库，使其进入对话历史，模型回复时能接住这个话题。
                     greeting = (body.greeting or "").strip()
                     if greeting and await svc.msg_repo.count(conv.id) == 0:
                         await svc.msg_repo.add(
@@ -415,153 +406,113 @@ class ChatService:
                             meta_data=self._user_meta(attachments, body.image_keys),
                         )
                     )
-        except Exception as e:
-            yield _sse("error", {"message": str(e)})
+        except Exception as exc:
+            yield _sse("error", {"message": str(exc)})
             return
 
-        yield _sse("meta", {"conversation_id": cid, "title": title})
-
-        # 先建立订阅再触发生成，消除「token 早于订阅而漏收」的竞态
-        conv_uuid = uuid.UUID(cid)
-        pubsub = await bus.open_channel(cid)
         try:
-            # 拿回合锁：若已有同会话生成在跑（用户重复发/并发），不重复触发，只转发现有生成
-            if await bus.acquire_turn_lock(cid):
+            run, claimed = await durable_stream.claim_run(
+                stream_type="chat", stream_key=cid, user_id=user_id
+            )
+            if claimed:
+                await durable_stream.append_event(
+                    run.id,
+                    "meta",
+                    {"conversation_id": cid, "title": title, "run_id": str(run.id)},
+                )
                 task = asyncio.create_task(
-                    self._run_chat_turn_bg(
-                        user_id, conv_uuid, body, attachments, skip_user_message
+                    self._run_chat_turn_durable(
+                        user_id,
+                        uuid.UUID(cid),
+                        body,
+                        attachments,
+                        skip_user_message,
+                        run.id,
                     )
                 )
                 _BG_TASKS.add(task)
                 task.add_done_callback(_BG_TASKS.discard)
-            # 转发频道事件给本客户端，直到 done/error
-            async for sse in self._relay(pubsub, cid):
-                yield sse
-        finally:
-            await bus.close_channel(pubsub, cid)
+        except Exception as exc:
+            yield _sse("error", {"message": f"创建对话流失败：{exc}"})
+            return
+        async for chunk in self._relay_durable(run.id):
+            yield chunk
 
     async def resume_events(
-        self, user_id: uuid.UUID, conv_id: uuid.UUID
+        self, user_id: uuid.UUID, conv_id: uuid.UUID, after_event_id: int = 0
     ) -> AsyncGenerator[str, None]:
-        """断线重连续传：若该会话正有生成在进行，先补推已生成内容（resume 事件），再续接后续
-        token 直到 done/error；没有进行中的生成则发 idle 立即结束。"""
-        # 校验会话归属用「用完即关」的独立 session，避免请求依赖 session 在续传期间被挂着
+        """按 Last-Event-ID 从持久化日志精确续传。"""
         async with SessionLocal() as session:
             conv = await ConversationRepository(session).get(user_id, conv_id)
         if not conv:
             yield _sse("error", {"message": "会话不存在"})
             return
-        cid = str(conv_id)
-        buf = await bus.get_stream_buffer(cid)
-        pubsub = await bus.open_channel(cid)
-        try:
-            # 二次确认（订阅后再读一次）：消除「读缓冲→订阅」间隙里生成刚好结束、
-            # done 已广播而本订阅错过的竞态。生成结束时是「先清缓冲再发 done」，
-            # 故订阅后缓冲若已不在 generating，说明已结束，让前端去重拉历史即可。
-            if not (buf and buf.get("status") == "generating"):
-                yield _sse("idle", {})
-                return
-            buf2 = await bus.get_stream_buffer(cid)
-            if not (buf2 and buf2.get("status") == "generating"):
-                yield _sse("idle", {})
-                return
-            buf = buf2
-            seen = int(buf.get("n", 0))
-            yield _sse(
-                "resume",
-                {
-                    "content": buf.get("content", ""),
-                    "citations": buf.get("citations", []),
-                    "tool_calls": buf.get("tool_calls", []),
-                },
-            )
-            async for sse in self._relay(pubsub, cid, skip_token_before=seen):
-                yield sse
-        finally:
-            await bus.close_channel(pubsub, cid)
+        run = await durable_stream.latest_run(
+            stream_type="chat", stream_key=str(conv_id), user_id=user_id
+        )
+        if run is None or run.status != "running":
+            yield _sse("idle", {})
+            return
+        if after_event_id > 0:
+            snapshot = await durable_stream.resume_snapshot(run.id, after_event_id)
+            yield _sse("resume", snapshot)
+        async for chunk in self._relay_durable(run.id, after_event_id):
+            yield chunk
 
-    async def _relay(
-        self, pubsub, cid: str, skip_token_before: int = 0
+    async def _relay_durable(
+        self, run_id: uuid.UUID, after_event_id: int = 0
     ) -> AsyncGenerator[str, None]:
-        """把频道事件转成 SSE 转发给客户端，遇 done/error 结束。
+        async for envelope in durable_stream.iter_events(
+            run_id, after_id=after_event_id
+        ):
+            yield ": ping\n\n" if envelope is None else durable_stream.sse(envelope)
 
-        skip_token_before：续传时跳过序号 < 该值的 token（这些已在 resume 补推的内容里）。
-        """
-        async for evt in bus.iter_channel(pubsub, cid):
-            ev = evt.get("event")
-            data = evt.get("data") or {}
-            if ev == "_ping":
-                yield ": ping\n\n"
-            elif ev == "token":
-                if int(data.get("i", 0)) < skip_token_before:
-                    continue
-                yield _sse("token", {"text": data.get("text", "")})
-            elif ev == "tool_start":
-                yield _sse(
-                    "tool_start",
-                    {"tool": data.get("tool"), "query": data.get("query", "")},
-                )
-            elif ev == "tool_result":
-                yield _sse("tool_result", data)
-            elif ev == "citation":
-                yield _sse("citation", {"citations": data.get("citations", [])})
-            elif ev == "done":
-                yield _sse("done", data)
-                return
-            elif ev == "error":
-                yield _sse("error", data)
-                return
-
-    async def _run_chat_turn_bg(
+    async def _run_chat_turn_durable(
         self,
         user_id: uuid.UUID,
         conv_id: uuid.UUID,
         body: ChatStreamRequest,
         attachments: list[dict],
         skip_user_message: bool,
+        run_id: uuid.UUID,
     ) -> None:
-        """后台生成任务：用独立 session 跑问答，逐 token 广播到频道 + 写续传缓冲，
-        完成后落库 assistant 消息并派发副作用（记忆/图片/情绪），最后广播 done。
-
-        与发起请求的 SSE 连接解耦：客户端断开不影响本任务，保证生成跑完、落库。
-        """
         cid = str(conv_id)
         user_text = body.message.strip()
         full_text = ""
+        pending_tokens = ""
         tool_calls: list[dict] = []
         citations: list[dict] = []
-        n = 0
 
-        async def _flush_buffer(status: str = "generating") -> None:
-            await bus.set_stream_buffer(
-                cid,
-                {
-                    "content": full_text,
-                    "n": n,
-                    "citations": citations,
-                    "tool_calls": tool_calls,
-                    "status": status,
-                },
-            )
+        async def flush_tokens() -> None:
+            nonlocal pending_tokens
+            if pending_tokens:
+                await durable_stream.append_event(
+                    run_id, "token", {"text": pending_tokens}
+                )
+                pending_tokens = ""
 
         try:
             tracer = get_tracer()
-            # 对话主任务包一层 trace,便于在「执行轨迹」页查看整个对话回合的工具调用/LLM/耗时/成本
             async with tracer.trace(
                 user_id=user_id,
                 task_type="chat",
                 task_id=conv_id,
                 task_name=(user_text[:120] or "(空)"),
             ) as tctx:
-                # 给前端发个 trace_id(可用作未来「查看执行轨迹」按钮)
-                await bus.publish(cid, "trace", {"trace_id": str(tctx.trace_id)})
+                await durable_stream.append_event(
+                    run_id, "trace", {"trace_id": str(tctx.trace_id)}
+                )
                 async with SessionLocal() as session:
                     svc = ChatService(session)
                     conv = await svc.conv_repo.get(user_id, conv_id)
                     if conv is None:
-                        await bus.publish(cid, "error", {"message": "会话不存在"})
+                        await durable_stream.finish_run(
+                            run_id,
+                            event="error",
+                            data={"message": "会话不存在"},
+                            error="会话不存在",
+                        )
                         return
-                    await _flush_buffer("generating")
                     async for ev in svc._generate_events(
                         user_id, conv, body, attachments, citations
                     ):
@@ -569,34 +520,36 @@ class ChatService:
                         if etype == "token":
                             text = ev["text"]
                             full_text += text
-                            await bus.publish(cid, "token", {"text": text, "i": n})
-                            n += 1
-                            if n % _BUFFER_FLUSH_EVERY == 0:
-                                await _flush_buffer("generating")
+                            pending_tokens += text
+                            if len(pending_tokens) >= _DURABLE_TOKEN_CHARS:
+                                await flush_tokens()
                         elif etype in {"tool_call", "tool_start"}:
-                            tool_calls.append({
-                                "tool": ev["tool"],
-                                "query": ev.get("query", ""),
-                                "status": "running",
-                            })
-                            await bus.publish(
-                                cid,
+                            await flush_tokens()
+                            tool_calls.append(
+                                {
+                                    "tool": ev["tool"],
+                                    "query": ev.get("query", ""),
+                                    "status": "running",
+                                }
+                            )
+                            await durable_stream.append_event(
+                                run_id,
                                 "tool_start",
                                 {"tool": ev["tool"], "query": ev.get("query", "")},
                             )
                         elif etype == "tool_result":
+                            await flush_tokens()
                             for item in reversed(tool_calls):
-                                if (
-                                    item.get("tool") == ev["tool"]
-                                    and item.get("status") == "running"
-                                ):
-                                    item["status"] = ev.get("status", "success")
-                                    item["stats"] = ev.get("stats") or {}
-                                    item["latency_ms"] = ev.get("latency_ms")
-                                    item["preview"] = ev.get("text", "")
+                                if item.get("tool") == ev["tool"] and item.get("status") == "running":
+                                    item.update(
+                                        status=ev.get("status", "success"),
+                                        stats=ev.get("stats") or {},
+                                        latency_ms=ev.get("latency_ms"),
+                                        preview=ev.get("text", ""),
+                                    )
                                     break
-                            await bus.publish(
-                                cid,
+                            await durable_stream.append_event(
+                                run_id,
                                 "tool_result",
                                 {
                                     "tool": ev["tool"],
@@ -609,12 +562,15 @@ class ChatService:
                             )
                         elif etype == "final" and not full_text:
                             full_text = ev["text"]
+                            pending_tokens += ev["text"]
                         elif etype == "citation":
+                            await flush_tokens()
                             citations = ev["citations"]
-                            await bus.publish(cid, "citation", {"citations": citations})
-
+                            await durable_stream.append_event(
+                                run_id, "citation", {"citations": citations}
+                            )
+                    await flush_tokens()
                     full_text = full_text.strip()
-                    # 落库 assistant 消息(带引用 + 工具调用元信息 + trace_id 便于前端跳「执行轨迹」)
                     assistant_msg = await svc.msg_repo.add(
                         Message(
                             conversation_id=conv_id,
@@ -628,31 +584,35 @@ class ChatService:
                         )
                     )
                     await svc.conv_repo.touch(conv_id)
-                    # 副作用（失败不影响）：记忆萃取派发 / 图片入库 / 情绪分析
                     await svc._dispatch_memory(user_id, user_text)
                     if body.image_keys:
                         await svc._ingest_chat_images(user_id, body.image_keys)
                     if not skip_user_message:
-                        svc._dispatch_emotion(user_id, user_text, conv_id, assistant_msg.id)
-
-                    # 先清缓冲再广播 done：保证「订阅时缓冲若仍在=done 尚未发出」，
-                    # 重连方据此不会订到一个已结束、done 已错过的频道而空等（见 resume_events）。
-                    await bus.clear_stream_buffer(cid)
-                await bus.publish(
-                    cid,
-                    "done",
-                    {"conversation_id": cid, "message_id": str(assistant_msg.id)},
+                        svc._dispatch_emotion(
+                            user_id, user_text, conv_id, assistant_msg.id
+                        )
+                await durable_stream.finish_run(
+                    run_id,
+                    event="done",
+                    data={"conversation_id": cid, "message_id": str(assistant_msg.id)},
+                    message_id=assistant_msg.id,
                 )
-        except Exception as e:
-            logger.error("问答后台生成失败: conv=%s err=%s", cid, e, exc_info=True)
-            # 已生成部分内容也落库，避免完全丢失
-            await self._save_partial_on_error(conv_id, full_text, citations, tool_calls)
-            await bus.clear_stream_buffer(cid)
-            await bus.publish(cid, "error", {"message": f"生成失败：{e}"})
-        finally:
-            await bus.clear_stream_buffer(cid)
-            await bus.release_turn_lock(cid)
-
+        except Exception as exc:
+            logger.error(
+                "问答后台生成失败: conv=%s err=%s", cid, exc, exc_info=True
+            )
+            await self._save_partial_on_error(
+                conv_id, full_text, citations, tool_calls
+            )
+            try:
+                await durable_stream.finish_run(
+                    run_id,
+                    event="error",
+                    data={"message": f"生成失败：{exc}"},
+                    error=str(exc),
+                )
+            except Exception:
+                logger.exception("持久化 SSE 错误事件失败: run=%s", run_id)
     async def _generate_events(
         self,
         user_id: uuid.UUID,

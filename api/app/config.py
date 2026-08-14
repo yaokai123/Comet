@@ -92,6 +92,17 @@ class Settings(BaseSettings):
     mineru_fallback_enabled: bool = True
     auto_wiki_max_chunks: int = 5000
     auto_wiki_max_pages: int = 200
+    federated_quality_max_candidates: int = 12
+    federated_llm_review_limit: int = 8
+    federated_llm_accept_score: float = 0.55
+    federated_fastpass_enabled: bool = True
+    stream_instance_id: str = ""
+    stream_internal_url: str = ""
+    stream_forward_secret: str = ""
+    stream_route_ttl_seconds: int = 60
+    stream_poll_interval_seconds: float = 0.75
+    stream_event_retention_hours: int = 24
+    stream_run_stale_seconds: int = 1800
 
     # 全局搜索语义门控（精确导向）：只展示余弦相似度 ≥ 阈值的结果，没有就不展示
     # 阈值为真实余弦相似度（-1~1），按实测可调；偏高更精准、偏低召回更多

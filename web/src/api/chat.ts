@@ -84,7 +84,7 @@ export interface SendOptions {
 
 // SSE 事件回调
 export interface StreamHandlers {
-  onMeta?: (d: { conversation_id: string; title: string }) => void
+  onMeta?: (d: { conversation_id: string; title: string; run_id?: string }) => void
   onToken?: (text: string) => void
   onToolStart?: (d: ToolCall) => void
   onToolResult?: (d: ToolCall & {
@@ -508,11 +508,16 @@ export async function subscribeChatEvents(
   signal?: AbortSignal,
 ): Promise<void> {
   const token = localStorage.getItem('access_token')
+  const cursorKey = `chat:last-event:${convId}`
+  const lastEventId = localStorage.getItem(cursorKey)
   let resp: Response
   try {
     resp = await fetch(`/api/chat/${convId}/events`, {
       method: 'GET',
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(lastEventId ? { 'Last-Event-ID': lastEventId } : {}),
+      },
       signal,
     })
   } catch {
@@ -537,9 +542,11 @@ export async function subscribeChatEvents(
     for (const block of blocks) {
       const lines = block.split('\n')
       let event = 'message'
+      let eventId = ''
       let data = ''
       for (const line of lines) {
         if (line.startsWith('event:')) event = line.slice(6).trim()
+        else if (line.startsWith('id:')) eventId = line.slice(3).trim()
         else if (line.startsWith('data:')) data += line.slice(5).trim()
       }
       if (!data) continue
@@ -549,6 +556,7 @@ export async function subscribeChatEvents(
       } catch {
         continue
       }
+      if (eventId) localStorage.setItem(cursorKey, eventId)
       dispatchEvent(event, payload, handlers)
     }
   }
@@ -580,6 +588,7 @@ async function streamSSE(
   const reader = resp.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let streamConversationId = body.conversation_id as string | undefined
 
   while (true) {
     const { done, value } = await reader.read()
@@ -591,9 +600,11 @@ async function streamSSE(
     for (const block of blocks) {
       const lines = block.split('\n')
       let event = 'message'
+      let eventId = ''
       let data = ''
       for (const line of lines) {
         if (line.startsWith('event:')) event = line.slice(6).trim()
+        else if (line.startsWith('id:')) eventId = line.slice(3).trim()
         else if (line.startsWith('data:')) data += line.slice(5).trim()
       }
       if (!data) continue
@@ -602,6 +613,11 @@ async function streamSSE(
         payload = JSON.parse(data)
       } catch {
         continue
+      }
+      streamConversationId =
+        (payload.conversation_id as string | undefined) ?? streamConversationId
+      if (eventId && streamConversationId) {
+        localStorage.setItem(`chat:last-event:${streamConversationId}`, eventId)
       }
       dispatchEvent(event, payload, handlers)
     }

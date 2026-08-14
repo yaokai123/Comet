@@ -21,6 +21,7 @@ from app.controllers import (
     group_chat_controller,
     health_controller,
     image_controller,
+    internal_stream_controller,
     knowledge_base_controller,
     mcp_controller,
     memory_controller,
@@ -40,6 +41,7 @@ from app.controllers import (
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(health_controller.router)
+api_router.include_router(internal_stream_controller.router)
 api_router.include_router(auth_controller.router)
 api_router.include_router(model_config_controller.router)
 api_router.include_router(document_controller.router)

@@ -92,7 +92,22 @@ async def build_enabled_tools(
     except Exception as e:
         logger.warning("构建 MCP 工具失败（忽略）: %s", e)
 
-    return tools
+    from app.core.agent.tools.federated import build_federated_tool, split_federated_tools
+
+    remaining, include_knowledge, external = split_federated_tools(tools)
+    if include_knowledge or external:
+        remaining.append(
+            await build_federated_tool(
+                session=session,
+                user_id=user_id,
+                citations=citations,
+                stats_holder=stats_holder if stats_holder is not None else {},
+                kb_ids=kb_ids,
+                include_knowledge=include_knowledge,
+                external_tools=external,
+            )
+        )
+    return remaining
 
 
 @asynccontextmanager
@@ -122,7 +137,26 @@ async def build_enabled_tools_cm(
         yield tools
         return
     async with open_mcp_tools(session, user_id) as mcp_tools:
-        yield [*tools, *mcp_tools]
+        combined = [*tools, *mcp_tools]
+        from app.core.agent.tools.federated import (
+            build_federated_tool,
+            split_federated_tools,
+        )
+
+        remaining, include_knowledge, external = split_federated_tools(combined)
+        if include_knowledge or external:
+            remaining.append(
+                await build_federated_tool(
+                    session=session,
+                    user_id=user_id,
+                    citations=citations,
+                    stats_holder=stats_holder if stats_holder is not None else {},
+                    kb_ids=kb_ids,
+                    include_knowledge=include_knowledge,
+                    external_tools=external,
+                )
+            )
+        yield remaining
 
 
 async def list_tools_for_user(
