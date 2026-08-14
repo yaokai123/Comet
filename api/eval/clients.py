@@ -34,6 +34,56 @@ def _normalize(scores: dict[str, float]) -> dict[str, float]:
     return {k: (v - lo) / (hi - lo) for k, v in scores.items()}
 
 
+def weighted_rrf(
+    rankings: list[tuple[list[str], float]], *, rank_constant: int = 60
+) -> list[tuple[str, float]]:
+    """Fuse ranked ids with weighted reciprocal-rank fusion.
+
+    Duplicate ids inside one ranking contribute only at their first position.
+    Ties are resolved by first appearance so repeated runs remain deterministic.
+    """
+    if rank_constant < 0:
+        raise ValueError("rank_constant must be non-negative")
+    scores: dict[str, float] = {}
+    first_seen: dict[str, int] = {}
+    sequence = 0
+    for ranked, weight in rankings:
+        seen: set[str] = set()
+        rank = 0
+        for item_id in ranked:
+            if not item_id or item_id in seen:
+                continue
+            seen.add(item_id)
+            rank += 1
+            if item_id not in first_seen:
+                first_seen[item_id] = sequence
+                sequence += 1
+            scores[item_id] = scores.get(item_id, 0.0) + weight / (rank_constant + rank)
+    return sorted(scores.items(), key=lambda item: (-item[1], first_seen[item[0]]))
+
+
+def rerank_view(content: str) -> str:
+    """Keep timestamp and the scored center turn from an enriched retrieval window."""
+    lines = content.splitlines()
+    session = next((line for line in lines if line.startswith("Session time: ")), None)
+    current_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.startswith("Current turn (retrieval target): ")
+        ),
+        None,
+    )
+    if current_index is None:
+        return content
+    selected = [line for line in (session, lines[current_index]) if line]
+    for line in lines[current_index + 1:]:
+        if line.startswith(("Previous turn ", "Current turn ", "Next turn ")):
+            break
+        selected.append(line)
+    return "\n".join(selected)
+
+
 async def retrieve_hybrid_contexts(
     embed_client, uid: str, query: str, top_k: int = 5,
     wv: float = 0.6, wb: float = 0.4, rerank_client=None,
@@ -114,6 +164,19 @@ async def retrieve_bm25(uid: str, query: str, recall: int = 20) -> list[str]:
 
 async def retrieve_hybrid(embed_client, uid: str, query: str, recall: int = 20,
                           wv: float = 0.6, wb: float = 0.4) -> list[str]:
+    rankings = await retrieve_hybrid_rankings(embed_client, uid, query, recall, wv, wb)
+    return rankings["hybrid"]
+
+
+async def retrieve_hybrid_rankings(
+    embed_client,
+    uid: str,
+    query: str,
+    recall: int = 20,
+    wv: float = 0.6,
+    wb: float = 0.4,
+) -> dict[str, list[str]]:
+    """Return vector, BM25, and score-fused source rankings from one retrieval pass."""
     es = get_es()
     qv = await embed_client.embed_one(query)
     knn = await es.search(index=CHUNKS_INDEX, body={
@@ -134,14 +197,81 @@ async def retrieve_hybrid(embed_client, uid: str, query: str, recall: int = 20,
         chunk_src[h["_id"]] = h["_source"].get("source_id")
     vn, bn = _normalize(vs), _normalize(bs)
     fused = {cid: wv * vn.get(cid, 0.0) + wb * bn.get(cid, 0.0) for cid in chunk_src}
+    vector = _dedup_sources(knn["hits"]["hits"])
+    bm25 = _dedup_sources(bm["hits"]["hits"])
     seen: set[str] = set()
-    out: list[str] = []
+    hybrid: list[str] = []
     for cid in sorted(fused, key=fused.get, reverse=True):
         sid = chunk_src.get(cid)
         if sid and sid not in seen:
             seen.add(sid)
-            out.append(sid)
-    return out
+            hybrid.append(sid)
+    return {"vector": vector, "bm25": bm25, "hybrid": hybrid}
+
+
+async def rerank_sources_rrf(
+    rerank_client,
+    uid: str,
+    query: str,
+    source_ids: list[str],
+    first_stage: dict[str, list[str]],
+    top_k: int,
+    *,
+    rank_constant: int = 10,
+    vector_weight: float = 1.0,
+    bm25_weight: float = 0.7,
+    rerank_weight: float = 6.0,
+) -> tuple[list[str], dict]:
+    """Rerank candidates and fuse vector/BM25/reranker ranks with weighted RRF."""
+    if not source_ids:
+        return [], {
+            "vector": [], "bm25": [], "candidates": [],
+            "reranker": [], "rrf": [], "final": [],
+        }
+    es = get_es()
+    resp = await es.search(index=CHUNKS_INDEX, body={
+        "size": len(source_ids),
+        "query": {"bool": {"filter": [
+            {"term": {"user_id": uid}},
+            {"terms": {"source_id": source_ids}},
+        ]}},
+    })
+    content_by_source = {
+        hit["_source"].get("source_id"): hit["_source"].get("content", "")
+        for hit in resp["hits"]["hits"]
+    }
+    contents = [rerank_view(content_by_source.get(source_id, "")) for source_id in source_ids]
+    pairs = await rerank_client.rerank(query, contents, top_n=None)
+    reranker_rows = [
+        {"source_id": source_ids[index], "score": round(score, 8)}
+        for index, score in pairs
+        if 0 <= index < len(source_ids)
+    ]
+    candidate_set = set(source_ids)
+    vector = [item for item in first_stage.get("vector", []) if item in candidate_set]
+    bm25 = [item for item in first_stage.get("bm25", []) if item in candidate_set]
+    reranked = [row["source_id"] for row in reranker_rows]
+    fused = weighted_rrf(
+        [
+            (vector, vector_weight),
+            (bm25, bm25_weight),
+            (reranked, rerank_weight),
+        ],
+        rank_constant=rank_constant,
+    )
+    final = [source_id for source_id, _ in fused[:top_k]]
+    trace = {
+        "vector": vector,
+        "bm25": bm25,
+        "candidates": source_ids,
+        "reranker": reranker_rows,
+        "rrf": [
+            {"source_id": source_id, "score": round(score, 10)}
+            for source_id, score in fused
+        ],
+        "final": final,
+    }
+    return final, trace
 
 
 async def rerank_sources(rerank_client, uid: str, query: str,

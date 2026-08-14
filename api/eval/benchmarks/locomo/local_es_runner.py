@@ -23,6 +23,41 @@ def _user_id(sample_id: str) -> str:
     return str(uuid.uuid5(_NAMESPACE, sample_id))
 
 
+def _turn_content(turn: dict) -> str:
+    content = f'{turn["speaker"]}: {turn["text"]}'
+    if turn["image_caption"]:
+        content += f'\nImage: {turn["image_caption"]}'
+    return content
+
+
+def _windowed_texts(turns: list[dict], radius: int = 1) -> list[str]:
+    """Render timestamped, session-bounded windows aligned to input turns."""
+    if radius < 0:
+        raise ValueError("window radius must be non-negative")
+    groups: dict[tuple[str, str], list[int]] = {}
+    for index, turn in enumerate(turns):
+        groups.setdefault((turn["sample_id"], turn["session_id"]), []).append(index)
+    rendered = [""] * len(turns)
+    for indices in groups.values():
+        for position, turn_index in enumerate(indices):
+            current = turns[turn_index]
+            lines = [f'Session time: {current["session_date_time"] or "unknown"}']
+            start = max(0, position - radius)
+            end = min(len(indices), position + radius + 1)
+            for neighbor_position in range(start, end):
+                offset = neighbor_position - position
+                if offset < 0:
+                    label = f"Previous turn {abs(offset)}"
+                elif offset > 0:
+                    label = f"Next turn {offset}"
+                else:
+                    label = "Current turn (retrieval target)"
+                neighbor = turns[indices[neighbor_position]]
+                lines.append(f"{label}: {_turn_content(neighbor)}")
+            rendered[turn_index] = "\n".join(lines)
+    return rendered
+
+
 async def _clear(sample_ids: list[str]) -> None:
     es = get_es()
     for sample_id in sample_ids:
@@ -34,20 +69,17 @@ async def _clear(sample_ids: list[str]) -> None:
         )
 
 
-async def _ingest(path: Path, embed_client, batch_size: int) -> dict:
+async def _ingest(path: Path, embed_client, batch_size: int, window_radius: int) -> dict:
     data = load_locomo(path, strict=False)
     await ensure_index()
     sample_ids = [row["sample_id"] for row in data["conversations"]]
     await _clear(sample_ids)
 
     turns = data["corpus"]
+    windowed_texts = _windowed_texts(turns, window_radius)
     for start in range(0, len(turns), batch_size):
         batch = turns[start:start + batch_size]
-        texts = [
-            f'{turn["speaker"]}: {turn["text"]}'
-            + (f'\nImage: {turn["image_caption"]}' if turn["image_caption"] else "")
-            for turn in batch
-        ]
+        texts = windowed_texts[start:start + len(batch)]
         vectors = await embed_client.embed(texts)
         docs = [
             build_chunk_doc(
@@ -72,24 +104,32 @@ async def _run(args: argparse.Namespace) -> None:
     reranker = eval_config.rerank_client() if args.rerank else None
     if args.rerank and reranker is None:
         raise RuntimeError("--rerank requires EVAL_RERANK_* configuration")
-    data = await _ingest(args.source, embed, args.batch_size)
+    data = await _ingest(args.source, embed, args.batch_size, args.window_radius)
 
     completed = 0
+    traces: dict[str, dict] = {}
 
     async def retrieve(query: dict, top_k: int) -> list[str]:
         nonlocal completed
         candidate_k = max(args.candidate_k, top_k)
-        ranked = await clients.retrieve_hybrid(
+        first_stage = await clients.retrieve_hybrid_rankings(
             embed, _user_id(query["sample_id"]), query["question"], candidate_k
         )
+        ranked = first_stage["hybrid"][:candidate_k]
         if reranker is not None:
-            ranked = await clients.rerank_sources(
+            ranked, trace = await clients.rerank_sources_rrf(
                 reranker,
                 _user_id(query["sample_id"]),
                 query["question"],
-                ranked[:candidate_k],
+                ranked,
+                first_stage,
                 top_k,
+                rank_constant=args.rrf_k,
+                vector_weight=args.vector_weight,
+                bm25_weight=args.bm25_weight,
+                rerank_weight=args.rerank_weight,
             )
+            traces[query["query_id"]] = {"query_id": query["query_id"], **trace}
         completed += 1
         if completed == 1 or completed % 25 == 0:
             print(f"[LoCoMo] query {completed}/{len(data['queries'])}", flush=True)
@@ -103,18 +143,36 @@ async def _run(args: argparse.Namespace) -> None:
         )
         manifest = {
             "run_id": run_id,
-            "protocol": "LoCoMo official evidence, turn-level Comet hybrid retrieval",
+            "protocol": (
+                "LoCoMo timestamped session-window retrieval + center-turn rerank + weighted RRF"
+                if reranker else
+                "LoCoMo timestamped session-window hybrid retrieval"
+            ),
             "embedding_model": embed.model_name,
             "rerank_model": reranker.model_name if reranker else None,
             "rerank_wire_api": reranker.wire_api if reranker else None,
             "candidate_k": args.candidate_k,
             "top_k": args.top_k,
+            "timestamp_enriched": True,
+            "window_radius": args.window_radius,
+            "rrf": {
+                "rank_constant": args.rrf_k,
+                "vector_weight": args.vector_weight,
+                "bm25_weight": args.bm25_weight,
+                "rerank_weight": args.rerank_weight,
+            } if reranker else None,
             "seed": None,
             "summary": summary,
         }
         (destination / "manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        if traces:
+            with (destination / "retrieval_traces.jsonl").open("w", encoding="utf-8") as handle:
+                for query in data["queries"]:
+                    trace = traces.get(query["query_id"])
+                    if trace is not None:
+                        handle.write(json.dumps(trace, ensure_ascii=False) + "\n")
         print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
         print(f"[LoCoMo] results={destination}", flush=True)
     finally:
@@ -131,6 +189,11 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--candidate-k", type=int, default=30)
     parser.add_argument("--rerank", action="store_true")
+    parser.add_argument("--window-radius", type=int, default=1)
+    parser.add_argument("--rrf-k", type=int, default=10)
+    parser.add_argument("--vector-weight", type=float, default=1.0)
+    parser.add_argument("--bm25-weight", type=float, default=0.7)
+    parser.add_argument("--rerank-weight", type=float, default=6.0)
     parser.add_argument("--keep-corpus", action="store_true")
     asyncio.run(_run(parser.parse_args()))
 
