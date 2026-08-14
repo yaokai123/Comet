@@ -1,7 +1,23 @@
 import asyncio
 
+import pytest
+
 from app.core.llm import client as client_module
 from app.core.llm.client import LLMClient
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("http://127.0.0.1:8082/rerank", True),
+        ("http://localhost:8082/rerank", True),
+        ("http://bge-reranker:80/rerank", True),
+        ("http://host.docker.internal:8082/rerank", True),
+        ("https://yohohoho.online/v1/chat/completions", False),
+    ],
+)
+def test_local_url_detection(url, expected):
+    assert client_module._is_local_url(url) is expected
 
 
 def test_tei_rerank_request_and_response(monkeypatch):

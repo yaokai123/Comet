@@ -8,6 +8,7 @@ V0.0.5 ③:每个对外网络调用自动包一层 `llm_call` span,记录 model 
 """
 import asyncio
 import os
+from urllib.parse import urlparse
 
 import httpx
 
@@ -39,23 +40,40 @@ _EMBED_CONCURRENCY = max(1, int(os.getenv("EMBED_CONCURRENCY", "8")))
 # 进程级共享 HTTP 客户端：复用连接池，避免每次请求重建 TCP/TLS。
 # 评测上万次嵌入调用时，握手开销累积可观，复用后显著提速。
 _shared_client: httpx.AsyncClient | None = None
+_shared_direct_client: httpx.AsyncClient | None = None
 
 
-def _get_shared_client() -> httpx.AsyncClient:
-    global _shared_client
-    if _shared_client is None or _shared_client.is_closed:
-        _shared_client = httpx.AsyncClient(
+def _get_shared_client(*, trust_env: bool = True) -> httpx.AsyncClient:
+    global _shared_client, _shared_direct_client
+    client = _shared_client if trust_env else _shared_direct_client
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+            trust_env=trust_env,
         )
-    return _shared_client
+        if trust_env:
+            _shared_client = client
+        else:
+            _shared_direct_client = client
+    return client
+
+
+def _is_local_url(url: str) -> bool:
+    """Return whether a URL targets loopback or a Docker-style local service."""
+    hostname = (urlparse(url).hostname or "").lower()
+    return hostname in {"localhost", "127.0.0.1", "::1", "host.docker.internal"} or (
+        bool(hostname) and "." not in hostname
+    )
 
 
 async def close_llm_client() -> None:
     """关闭共享 HTTP 客户端（应用/评测退出时调用）。"""
-    global _shared_client
-    if _shared_client is not None and not _shared_client.is_closed:
-        await _shared_client.aclose()
+    global _shared_client, _shared_direct_client
+    for client in (_shared_client, _shared_direct_client):
+        if client is not None and not client.is_closed:
+            await client.aclose()
     _shared_client = None
+    _shared_direct_client = None
 
 
 async def _post_with_retry(
@@ -67,7 +85,10 @@ async def _post_with_retry(
     其余 4xx（如鉴权/参数错误）不重试，直接抛出。
     """
     last_exc: Exception | None = None
-    client = _get_shared_client()
+    # Windows/system proxy settings can otherwise intercept loopback and Docker
+    # service requests and return a synthetic 502. Preserve proxy support for
+    # external providers while sending local model traffic directly.
+    client = _get_shared_client(trust_env=not _is_local_url(url))
     for attempt in range(_MAX_RETRIES):
         try:
             resp = await client.post(url, headers=headers, json=json, timeout=timeout)
