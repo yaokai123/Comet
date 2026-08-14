@@ -28,8 +28,22 @@ _MAPPING = {
             "chunk_id": {"type": "keyword"},
             "chunk_type": {"type": "keyword"},  # child | parent | image_desc
             "parent_id": {"type": "keyword"},  # child 指向其 parent chunk_id
+            "document_version_id": {"type": "keyword"},
+            "chunk_strategy": {"type": "keyword"},
+            "section_path": {"type": "keyword"},
+            "page_start": {"type": "integer"},
+            "page_end": {"type": "integer"},
+            "element_types": {"type": "keyword"},
+            "block_ids": {"type": "keyword"},
+            "region_ids": {"type": "keyword"},
+            "logical_table_ids": {"type": "keyword"},
             # content 用 IK 中文分词：写入 ik_max_word（细粒度），查询 ik_smart（粗粒度）
             "content": {
+                "type": "text",
+                "analyzer": "ik_max_word",
+                "search_analyzer": "ik_smart",
+            },
+            "retrieval_text": {
                 "type": "text",
                 "analyzer": "ik_max_word",
                 "search_analyzer": "ik_smart",
@@ -69,6 +83,7 @@ async def ensure_index() -> None:
     # 已存在：检查 kb_id 字段类型
     kb_type = await _kb_id_type(es)
     if kb_type == "keyword":
+        await _ensure_enterprise_fields(es)
         return  # 已正确，无需处理
     if kb_type is None:
         # 字段缺失：增量补齐（不影响存量）
@@ -80,6 +95,7 @@ async def ensure_index() -> None:
             logger.info("ES 索引已存在，已补齐 kb_id 字段: %s", CHUNKS_INDEX)
         except Exception as e:
             logger.warning("补齐 ES kb_id 字段失败（忽略）: %s", e)
+        await _ensure_enterprise_fields(es)
         return
     # 类型不对（多为 text）：reindex 重建
     logger.warning(
@@ -92,6 +108,21 @@ async def ensure_index() -> None:
         logger.info("ES 索引 kb_id 类型修复完成: %s", CHUNKS_INDEX)
     except Exception as e:
         logger.error("ES 索引 kb_id 修复失败（多库检索过滤将不生效）: %s", e, exc_info=True)
+
+
+async def _ensure_enterprise_fields(es) -> None:
+    """Add enterprise metadata fields without rebuilding an existing index."""
+
+    properties = _MAPPING["mappings"]["properties"]
+    try:
+        response = await es.indices.get_mapping(index=CHUNKS_INDEX)
+        existing = response[CHUNKS_INDEX]["mappings"].get("properties", {})
+        missing = {name: spec for name, spec in properties.items() if name not in existing}
+        if missing:
+            await es.indices.put_mapping(index=CHUNKS_INDEX, body={"properties": missing})
+            logger.info("ES index %s added %d enterprise fields", CHUNKS_INDEX, len(missing))
+    except Exception as exc:
+        logger.warning("Unable to add enterprise ES fields: %s", exc)
 
 
 async def _kb_id_type(es) -> str | None:

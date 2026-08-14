@@ -15,6 +15,7 @@ from app.controllers import (
     dashboard_controller,
     document_controller,
     emotion_controller,
+    enterprise_knowledge_controller,
     favorite_controller,
     file_controller,
     group_chat_controller,
@@ -44,6 +45,7 @@ api_router.include_router(model_config_controller.router)
 api_router.include_router(document_controller.router)
 api_router.include_router(image_controller.router)
 api_router.include_router(knowledge_base_controller.router)
+api_router.include_router(enterprise_knowledge_controller.router)
 api_router.include_router(project_controller.router)
 api_router.include_router(product_event_controller.router)
 api_router.include_router(tag_controller.router)

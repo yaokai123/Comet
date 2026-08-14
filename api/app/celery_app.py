@@ -25,6 +25,7 @@ celery_app = Celery(
         "app.tasks.beat",
         "app.tasks.agent_task",
         "app.tasks.document_outbox",
+        "app.tasks.knowledge_maintenance",
     ],
 )
 
@@ -44,6 +45,7 @@ celery_app.conf.update(
         "app.tasks.music.*": {"queue": "parse"},
         "app.tasks.beat.*": {"queue": "beat"},
         "app.tasks.document_outbox.*": {"queue": "beat"},
+        "app.tasks.knowledge_maintenance.*": {"queue": "beat"},
         # 调度心跳留 beat 队列（轻量）；研究执行进独立 research 队列，避免长任务堵死心跳
         "app.tasks.agent_task.heartbeat": {"queue": "beat"},
         "app.tasks.agent_task.run": {"queue": "research"},
@@ -51,6 +53,10 @@ celery_app.conf.update(
     # Celery beat 定时
     beat_schedule={
         "document-outbox-reconcile": {"task": "app.tasks.document_outbox.reconcile", "schedule": crontab(minute="*/2")},
+        "enterprise-knowledge-inspection": {
+            "task": "app.tasks.knowledge_maintenance.inspect",
+            "schedule": crontab(minute=15),
+        },
         "agent-task-heartbeat": {
             "task": "app.tasks.agent_task.heartbeat",
             "schedule": crontab(minute="*"),  # 每分钟扫定时任务表

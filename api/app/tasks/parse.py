@@ -5,8 +5,10 @@ Celery 任务为同步入口，内部用 asyncio.run 跑异步流程。
 避免全局单例绑定到已关闭的旧事件循环。
 """
 import asyncio
+import hashlib
 import uuid
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.models  # noqa: F401  确保所有 ORM 模型注册到 metadata
@@ -14,6 +16,7 @@ from app.celery_app import celery_app
 from app.core.llm.resolver import get_client_for_type, get_optional_client_for_type
 from app.core.logging import get_logger
 from app.core.task_lock import redis_task_lock
+from app.core.knowledge.adaptive_chunker import AdaptiveChunker, infer_plain_text_ir
 from app.core.rag.chunker import chunk_parent_child
 from app.core.rag.classifier import classify_content
 from app.core.rag.es_index import CHUNK_TYPE_CHILD, CHUNK_TYPE_PARENT
@@ -33,6 +36,7 @@ from app.models.document_model import (
     DOC_STATUS_PARSING,
 )
 from app.models.document_index_job_model import DocumentIndexJob
+from app.models.enterprise_knowledge_model import DocumentVersion
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.tag_repository import TagRepository
 
@@ -74,6 +78,7 @@ async def _parse(session: AsyncSession, document_id: str, doc_uuid: uuid.UUID, g
 async def _parse_locked(session: AsyncSession, document_id: str, doc, generation: int | None, job_id: str | None) -> None:
     repo = DocumentRepository(session)
     job = None
+    document_version = None
 
     try:
         if generation is not None and doc.generation != generation:
@@ -87,6 +92,32 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
 
         # 1. 取文件
         content = await get_storage().get(doc.file_key)
+        content_hash = hashlib.sha256(content).hexdigest()
+        document_version = await session.scalar(
+            select(DocumentVersion).where(
+                DocumentVersion.document_id == doc.id,
+                DocumentVersion.content_hash == content_hash,
+            )
+        )
+        if document_version is None:
+            latest_no = await session.scalar(
+                select(func.max(DocumentVersion.version_no)).where(
+                    DocumentVersion.document_id == doc.id
+                )
+            )
+            document_version = DocumentVersion(
+                document_id=doc.id,
+                version_no=(latest_no or 0) + 1,
+                content_hash=content_hash,
+                parser_name="legacy",
+                parser_version="1",
+                status="parsing",
+                metadata_json={"generation": doc.generation},
+            )
+            session.add(document_version)
+            await session.flush()
+        else:
+            document_version.status = "parsing"
         # 2. 解析为纯文本
         text = parse_document(doc.file_ext, content)
         if not text.strip():
@@ -94,9 +125,16 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
         doc.progress = 0.3
         await repo.save(doc)
 
-        # 3. 父子分块
-        parents = chunk_parent_child(text)
-        if not parents:
+        # 3. Analyze structure and select a chunking strategy. Parsers that still
+        # return text are converted to the canonical IR through a compatibility adapter.
+        document_ir = infer_plain_text_ir(
+            document_id=document_id,
+            version_id=str(document_version.id),
+            title=doc.file_name,
+            text=text,
+        )
+        adaptive_chunks, chunk_decision = AdaptiveChunker().chunk(document_ir)
+        if not adaptive_chunks:
             raise ValueError("分块结果为空")
 
         # 4. 子块向量化（用用户默认 embedding 模型）
@@ -105,37 +143,53 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
         kb_id = str(doc.kb_id) if doc.kb_id else None
         es_docs: list[dict] = []
         chunk_total = 0
-        for parent in parents:
-            parent_doc = build_chunk_doc(
-                user_id=user_id,
-                source_type="document",
-                source_id=document_id,
-                doc_name=doc.file_name,
-                chunk_type=CHUNK_TYPE_PARENT,
-                content=parent.content,
-                vector=None,
-                kb_id=kb_id,
-            )
-            parent_chunk_id = parent_doc["_id"]
-            es_docs.append(parent_doc)
+        for adaptive in adaptive_chunks:
+            parents = chunk_parent_child(adaptive.retrieval_text)
+            metadata = {
+                "retrieval_text": adaptive.retrieval_text,
+                "document_version_id": str(document_version.id),
+                "chunk_strategy": chunk_decision.applied.value,
+                "section_path": list(adaptive.section_path),
+                "page_start": adaptive.page_start,
+                "page_end": adaptive.page_end,
+                "element_types": list(adaptive.element_types),
+                "block_ids": list(adaptive.block_ids),
+                "region_ids": adaptive.metadata.get("region_ids", []),
+                "logical_table_ids": adaptive.metadata.get("logical_table_ids", []),
+            }
+            for parent in parents:
+                parent_doc = build_chunk_doc(
+                    user_id=user_id,
+                    source_type="document",
+                    source_id=document_id,
+                    doc_name=doc.file_name,
+                    chunk_type=CHUNK_TYPE_PARENT,
+                    content=parent.content,
+                    vector=None,
+                    kb_id=kb_id,
+                    **metadata,
+                )
+                parent_chunk_id = parent_doc["_id"]
+                es_docs.append(parent_doc)
 
-            if parent.children:
-                vectors = await embed_client.embed(parent.children)
-                for child, vec in zip(parent.children, vectors):
-                    es_docs.append(
-                        build_chunk_doc(
-                            user_id=user_id,
-                            source_type="document",
-                            source_id=document_id,
-                            doc_name=doc.file_name,
-                            chunk_type=CHUNK_TYPE_CHILD,
-                            content=child,
-                            vector=vec,
-                            parent_id=parent_chunk_id,
-                            kb_id=kb_id,
+                if parent.children:
+                    vectors = await embed_client.embed(parent.children)
+                    for child, vec in zip(parent.children, vectors):
+                        es_docs.append(
+                            build_chunk_doc(
+                                user_id=user_id,
+                                source_type="document",
+                                source_id=document_id,
+                                doc_name=doc.file_name,
+                                chunk_type=CHUNK_TYPE_CHILD,
+                                content=child,
+                                vector=vec,
+                                parent_id=parent_chunk_id,
+                                kb_id=kb_id,
+                                **metadata,
+                            )
                         )
-                    )
-                    chunk_total += 1
+                        chunk_total += 1
         doc.progress = 0.8
         await repo.save(doc)
 
@@ -154,6 +208,7 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
         doc.error_msg = None
         if job:
             job.status = "done"
+        document_version.status = "ready"
         await repo.save(doc)
         logger.info("文档解析完成: %s chunks=%d", document_id, chunk_total)
     except Exception as e:
@@ -162,6 +217,8 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
         doc.error_msg = str(e)[:500]
         if job:
             job.status, job.error_msg = "failed", str(e)[:2000]
+        if document_version is not None:
+            document_version.status = "failed"
         await repo.save(doc)
 
 

@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.llm.resolver import get_client_for_type, get_optional_client_for_type
+from app.core.knowledge.rag_pipeline import reciprocal_rank_fusion
 from app.core.logging import get_logger
 from app.core.rag.es_index import CHUNK_TYPE_CHILD, CHUNK_TYPE_IMAGE, CHUNKS_INDEX
 from app.db.elastic import get_es
@@ -98,14 +99,22 @@ async def hybrid_search(
             "size": recall_size,
             "query": {
                 "bool": {
-                    "must": [{"match": {"content": query}}],
+                    "must": [
+                        {
+                            "multi_match": {
+                                "query": query,
+                                "fields": ["retrieval_text^1.2", "content"],
+                            }
+                        }
+                    ],
                     "filter": base_filter,
                 }
             },
         },
     )
 
-    # 3. 收集 + 归一化 + 加权融合
+    # 3. Collect rankings and fuse by rank. RRF keeps scores from heterogeneous
+    # retrievers comparable and avoids min-max instability on small candidate sets.
     hits: dict[str, dict] = {}
     vec_scores: dict[str, float] = {}
     bm_scores: dict[str, float] = {}
@@ -116,13 +125,15 @@ async def hybrid_search(
         hits[h["_id"]] = h["_source"]
         bm_scores[h["_id"]] = h["_score"]
 
-    vec_n = _normalize(vec_scores)
-    bm_n = _normalize(bm_scores)
-    fused: dict[str, float] = {}
-    for cid in hits:
-        fused[cid] = (
-            _VECTOR_WEIGHT * vec_n.get(cid, 0.0) + _BM25_WEIGHT * bm_n.get(cid, 0.0)
+    vector_ranking = [hit["_id"] for hit in knn_resp["hits"]["hits"]]
+    bm25_ranking = [hit["_id"] for hit in bm25_resp["hits"]["hits"]]
+    fused = dict(
+        reciprocal_rank_fusion(
+            {"vector": vector_ranking, "bm25": bm25_ranking},
+            weights={"vector": _VECTOR_WEIGHT, "bm25": _BM25_WEIGHT},
+            k=10,
         )
+    )
 
     # 3.5 精确模式（全局搜索）：纯语义余弦门控
     # ES cosine knn 的 _score = (1 + cos) / 2 → cos = 2*score - 1
@@ -157,10 +168,17 @@ async def hybrid_search(
     # 4. 可选 rerank（用户配了 rerank 模型才走）
     rerank_client = await get_optional_client_for_type(session, user_id, "rerank")
     if rerank_client and candidate_ids:
-        docs = [hits[cid]["content"] for cid in candidate_ids]
+        docs = [hits[cid].get("retrieval_text") or hits[cid]["content"] for cid in candidate_ids]
         try:
-            reranked = await rerank_client.rerank(query, docs, top_n=top_k)
-            candidate_ids = [candidate_ids[idx] for idx, _ in reranked]
+            reranked = await rerank_client.rerank(query, docs, top_n=len(candidate_ids))
+            rerank_ids = [candidate_ids[idx] for idx, _ in reranked]
+            rerank_fused = reciprocal_rank_fusion(
+                {"first_stage": candidate_ids, "reranker": rerank_ids},
+                weights={"first_stage": 1.0, "reranker": 6.0},
+                k=10,
+            )
+            candidate_ids = [candidate_id for candidate_id, _ in rerank_fused]
+            fused.update(dict(rerank_fused))
         except Exception as e:
             logger.warning("rerank 失败，回退加权融合排序: %s", e)
 
