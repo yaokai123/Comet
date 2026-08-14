@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     stream_poll_interval_seconds: float = 0.75
     stream_event_retention_hours: int = 24
     stream_run_stale_seconds: int = 1800
+    chat_image_max_count: int = 6
+    chat_image_max_bytes: int = 10 * 1024 * 1024
+    vision_history_image_max_count: int = 8
+    vision_history_image_budget_bytes: int = 12 * 1024 * 1024
 
     # 全局搜索语义门控（精确导向）：只展示余弦相似度 ≥ 阈值的结果，没有就不展示
     # 阈值为真实余弦相似度（-1~1），按实测可调；偏高更精准、偏低召回更多

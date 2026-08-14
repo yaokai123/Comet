@@ -32,7 +32,7 @@ class ChatStreamRequest(BaseModel):
     # 本轮挂载的技能 id（任务能力包，override 提示词/工具白名单/知识库范围）；None=不挂载
     skill_id: uuid.UUID | None = None
     # 多模态：图片 file_key 列表（阶段5 第③步接入）
-    image_keys: list[str] = Field(default_factory=list)
+    image_keys: list[str] = Field(default_factory=list, max_length=6)
     # 对话临时附件（文档文本），仅本次对话上下文使用，不入库
     attachments: list[ChatAttachment] = Field(default_factory=list)
     # 本轮工具开关（覆盖 agent 默认），None 表示用 agent 配置默认

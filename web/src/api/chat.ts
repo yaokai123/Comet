@@ -18,10 +18,13 @@ export interface Conversation {
 }
 
 export interface Citation {
+  citation_index?: number
   source_id: string
   source_type: string | null
   doc_name: string | null
   score: number | null
+  image_url?: string | null
+  thumbnail_url?: string | null
 }
 
 export interface ToolCall {
@@ -502,65 +505,138 @@ export async function regenerateMessage(
 
 // 断线重连续传：订阅某会话「进行中的生成」（GET SSE）。
 // 后端若发现没有进行中的生成会立即返回 idle 并结束。
+const SSE_RETRY_BASE_MS = 500
+const SSE_RETRY_MAX_MS = 10_000
+
+function reconnectDelay(attempt: number): number {
+  const exponential = Math.min(SSE_RETRY_MAX_MS, SSE_RETRY_BASE_MS * 2 ** attempt)
+  return Math.round(exponential * (0.8 + Math.random() * 0.4))
+}
+
+function waitForReconnect(delay: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (value: boolean) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      window.removeEventListener('online', wake)
+      document.removeEventListener('visibilitychange', visible)
+      signal?.removeEventListener('abort', aborted)
+      resolve(value)
+    }
+    const wake = () => finish(true)
+    const visible = () => {
+      if (document.visibilityState === 'visible') finish(true)
+    }
+    const aborted = () => finish(false)
+    const timer = window.setTimeout(() => finish(true), delay)
+    window.addEventListener('online', wake, { once: true })
+    document.addEventListener('visibilitychange', visible)
+    signal?.addEventListener('abort', aborted, { once: true })
+  })
+}
+
+// GET SSE 自动重连：指数退避；online/页面重新可见会立即重建连接。
 export async function subscribeChatEvents(
   convId: string,
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = localStorage.getItem('access_token')
   const cursorKey = `chat:last-event:${convId}`
-  const lastEventId = localStorage.getItem(cursorKey)
-  let resp: Response
-  try {
-    resp = await fetch(`/api/chat/${convId}/events`, {
-      method: 'GET',
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(lastEventId ? { 'Last-Event-ID': lastEventId } : {}),
-      },
-      signal,
-    })
-  } catch {
-    // 网络错误/主动中断：静默（前端自行处理重连）
-    return
-  }
-  if (!resp.ok || !resp.body) return
-  const reader = resp.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  while (true) {
-    let chunk: ReadableStreamReadResult<Uint8Array>
+  let attempt = 0
+  while (!signal?.aborted) {
+    const token = localStorage.getItem('access_token')
+    const lastEventId = localStorage.getItem(cursorKey)
+    const connection = new AbortController()
+    let forcedReconnect = false
+    const abortConnection = () => connection.abort()
+    const reconnectWhenOnline = () => {
+      forcedReconnect = true
+      connection.abort()
+    }
+    const reconnectWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        forcedReconnect = true
+        connection.abort()
+      }
+    }
+    signal?.addEventListener('abort', abortConnection, { once: true })
+    window.addEventListener('online', reconnectWhenOnline)
+    document.addEventListener('visibilitychange', reconnectWhenVisible)
+    let terminal = false
+    let receivedEvent = false
     try {
-      chunk = await reader.read()
-    } catch {
-      break
-    }
-    if (chunk.done) break
-    buffer += decoder.decode(chunk.value, { stream: true })
-    const blocks = buffer.split('\n\n')
-    buffer = blocks.pop() ?? ''
-    for (const block of blocks) {
-      const lines = block.split('\n')
-      let event = 'message'
-      let eventId = ''
-      let data = ''
-      for (const line of lines) {
-        if (line.startsWith('event:')) event = line.slice(6).trim()
-        else if (line.startsWith('id:')) eventId = line.slice(3).trim()
-        else if (line.startsWith('data:')) data += line.slice(5).trim()
+      const resp = await fetch(`/api/chat/${convId}/events`, {
+        method: 'GET',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(lastEventId ? { 'Last-Event-ID': lastEventId } : {}),
+        },
+        signal: connection.signal,
+      })
+      if (resp.status === 401 || resp.status === 403 || resp.status === 404) {
+        handlers.onError?.(`续传失败（HTTP ${resp.status}）`)
+        return
       }
-      if (!data) continue
-      let payload: Record<string, unknown> = {}
-      try {
-        payload = JSON.parse(data)
-      } catch {
-        continue
+      if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`)
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (!signal?.aborted) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        buffer += decoder.decode(chunk.value, { stream: true })
+        const blocks = buffer.split('\n\n')
+        buffer = blocks.pop() ?? ''
+        for (const block of blocks) {
+          const lines = block.split('\n')
+          let event = 'message'
+          let eventId = ''
+          let data = ''
+          for (const line of lines) {
+            if (line.startsWith('event:')) event = line.slice(6).trim()
+            else if (line.startsWith('id:')) eventId = line.slice(3).trim()
+            else if (line.startsWith('data:')) data += line.slice(5).trim()
+          }
+          if (!data) continue
+          let payload: Record<string, unknown>
+          try {
+            payload = JSON.parse(data)
+          } catch {
+            continue
+          }
+          receivedEvent = true
+          attempt = 0
+          if (eventId) localStorage.setItem(cursorKey, eventId)
+          dispatchEvent(event, payload, handlers)
+          if (event === 'done' || event === 'error' || event === 'idle') {
+            terminal = true
+            return
+          }
+        }
       }
-      if (eventId) localStorage.setItem(cursorKey, eventId)
-      dispatchEvent(event, payload, handlers)
+    } catch (error) {
+      if (signal?.aborted) return
+      // connection.abort() is also used to force a clean reconnect on online/visible.
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        // Transient network/proxy failures are retried without surfacing a false final error.
+      }
+    } finally {
+      signal?.removeEventListener('abort', abortConnection)
+      window.removeEventListener('online', reconnectWhenOnline)
+      document.removeEventListener('visibilitychange', reconnectWhenVisible)
     }
+    if (terminal || signal?.aborted) return
+    const keepGoing = await waitForReconnect(
+      forcedReconnect ? 0 : reconnectDelay(receivedEvent ? 0 : attempt++),
+      signal,
+    )
+    if (!keepGoing) return
   }
 }
+
 
 // 通用 SSE POST 解析
 async function streamSSE(
@@ -589,9 +665,17 @@ async function streamSSE(
   const decoder = new TextDecoder()
   let buffer = ''
   let streamConversationId = body.conversation_id as string | undefined
+  let terminal = false
 
   while (true) {
-    const { done, value } = await reader.read()
+    let chunk: ReadableStreamReadResult<Uint8Array>
+    try {
+      chunk = await reader.read()
+    } catch (error) {
+      if (signal?.aborted) throw error
+      break
+    }
+    const { done, value } = chunk
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     // 按 SSE 事件分隔（空行）切分
@@ -620,7 +704,13 @@ async function streamSSE(
         localStorage.setItem(`chat:last-event:${streamConversationId}`, eventId)
       }
       dispatchEvent(event, payload, handlers)
+      if (event === 'done' || event === 'error' || event === 'idle') terminal = true
     }
+  }
+  if (!terminal && streamConversationId && !signal?.aborted) {
+    await subscribeChatEvents(streamConversationId, handlers, signal)
+  } else if (!terminal && !streamConversationId && !signal?.aborted) {
+    handlers.onError?.('连接在会话创建前中断，请重新发送')
   }
 }
 

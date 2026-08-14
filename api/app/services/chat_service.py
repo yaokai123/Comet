@@ -14,11 +14,13 @@ from collections.abc import AsyncGenerator
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.agent.orchestrator import run_function_calling, run_react
 from app.core.agent.tools import build_enabled_tools
 from app.core.agent.tracing import get_tracer
 from app.core.realtime import durable_stream
 from app.core.llm.chat_model import (
+    CAP_VISION,
     build_chat_model,
     build_default_chat_model,
     get_default_config_for_type,
@@ -137,6 +139,12 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _number_citations(citations: list[dict]) -> list[dict]:
+    for index, citation in enumerate(citations, start=1):
+        citation["citation_index"] = index
+    return citations
+
+
 class ChatService:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -169,7 +177,9 @@ class ChatService:
             await ProjectService(self.session).get_owned(user_id, body.project_id)
         return await self.conv_repo.create(Conversation(user_id=user_id, title=title, project_id=body.project_id))
 
-    async def _history_messages(self, conv_id: uuid.UUID) -> list:
+    async def _history_messages(
+        self, conv_id: uuid.UUID, user_id: uuid.UUID
+    ) -> tuple[list, bool]:
         """历史消息转 LangChain 消息（不含 system 与当前问题）。
 
         当前问题会在主流程单独追加，故这里丢弃末尾那条 user 消息（即本轮刚落库的提问），
@@ -177,19 +187,88 @@ class ChatService:
         若某条历史 user 消息带对话附件（meta_data.attachments），把附件全文还原进
         该轮 HumanMessage，使后续追问在历史窗口内仍能看到文档内容。
         """
-        out: list = []
         history = await self.msg_repo.recent_history(conv_id, MAX_HISTORY_TURNS)
         # 丢弃末尾连续的 user 消息（本轮提问），它由主流程单独追加
         while history and history[-1].role == ROLE_USER:
             history.pop()
+        history_has_images = any(
+            bool((m.meta_data or {}).get("image_keys"))
+            for m in history
+            if m.role == ROLE_USER
+        )
+        image_parts_by_message: dict[uuid.UUID, list[dict]] = {}
+        if history_has_images:
+            remaining_bytes = settings.vision_history_image_budget_bytes
+            remaining_count = settings.vision_history_image_max_count
+            # 优先保留最近的历史图片，再恢复为原消息顺序。
+            for message in reversed(history):
+                if message.role != ROLE_USER or remaining_count <= 0 or remaining_bytes <= 0:
+                    continue
+                keys = list((message.meta_data or {}).get("image_keys") or [])
+                parts, spent = await self._load_vision_image_parts(
+                    user_id,
+                    keys,
+                    byte_budget=remaining_bytes,
+                    max_count=remaining_count,
+                )
+                if parts:
+                    image_parts_by_message[message.id] = parts
+                    remaining_bytes -= spent
+                    remaining_count -= len(parts)
+
+        out: list = []
         for m in history:
             if m.role == ROLE_USER:
                 atts = (m.meta_data or {}).get("attachments") if m.meta_data else None
                 content = _compose_with_attachments(m.content, atts or [])
-                out.append(HumanMessage(content=content))
+                parts = image_parts_by_message.get(m.id, [])
+                out.append(
+                    HumanMessage(
+                        content=[{"type": "text", "text": content}, *parts]
+                        if parts
+                        else content
+                    )
+                )
             elif m.role == ROLE_ASSISTANT:
                 out.append(AIMessage(content=m.content))
-        return out
+        return out, history_has_images
+
+    async def _load_vision_image_parts(
+        self,
+        user_id: uuid.UUID,
+        image_keys: list[str],
+        *,
+        byte_budget: int,
+        max_count: int,
+    ) -> tuple[list[dict], int]:
+        """按用户归属读取图片，在压缩后字节预算内构造多模态内容块。"""
+        import base64
+        from pathlib import Path
+
+        from app.core.rag.chat_images import validate_chat_image_keys
+        from app.core.rag.image_compress import compress_for_vision
+
+        storage = get_storage()
+        parts: list[dict] = []
+        spent = 0
+        for key in image_keys[:max_count]:
+            try:
+                await validate_chat_image_keys(user_id, [key])
+                raw = await storage.get(key)
+                data, mime = compress_for_vision(raw, Path(key).suffix)
+                if spent + len(data) > byte_budget:
+                    continue
+                b64 = base64.b64encode(data).decode()
+                parts.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{b64}"},
+                    }
+                )
+                spent += len(data)
+            except Exception as exc:
+                logger.warning("历史图片读取失败（跳过 %s）: %s", key, exc)
+        return parts, spent
 
     async def _cross_session_context(
         self, user_id: uuid.UUID, current_conv_id: uuid.UUID
@@ -383,6 +462,10 @@ class ChatService:
             if a.text
         ]
         try:
+            if body.image_keys:
+                from app.core.rag.chat_images import validate_chat_image_keys
+
+                await validate_chat_image_keys(user_id, body.image_keys)
             async with SessionLocal() as session:
                 svc = ChatService(session)
                 conv = await svc._ensure_conversation(user_id, body)
@@ -633,9 +716,6 @@ class ChatService:
         skill = None
         if body.skill_id:
             skill = await self.skill_repo.get(user_id, body.skill_id)
-        model, config = await build_default_chat_model(
-            self.session, user_id, temperature=temperature, streaming=True
-        )
         base_prompt = self._compose_system_prompt(persona, skill)
         stats_holder: dict[str, dict] = {}
         composed_text = _compose_with_attachments(user_text, attachments)
@@ -666,20 +746,23 @@ class ChatService:
                 sp = (sp + "\n\n" + render_agent_prompt("human_style.jinja2")).strip()
             return sp
 
-        history = await self._history_messages(conv.id)
+        history, history_has_images = await self._history_messages(conv.id, user_id)
 
-        if body.image_keys:
-            # 多模态输入：用多模态模型看图回答（不走工具编排，无需 MCP 会话）
+        if body.image_keys or history_has_images:
+            # 当前轮或历史窗口含图片时强制走视觉模型；历史图片按消息聚合并受总预算约束。
             system_prompt = await _assemble_prompt(has_tools=False)
             async for token in self._stream_multimodal(
                 user_id, system_prompt, history, composed_text, body.image_keys
             ):
                 yield {"type": "token", "text": token}
             if citations:
-                yield {"type": "citation", "citations": citations}
+                yield {"type": "citation", "citations": _number_citations(citations)}
             return
 
         # 非多模态：构建工具（内置 + 带 TTL 缓存的 MCP 工具清单）并跑编排。
+        model, config = await build_default_chat_model(
+            self.session, user_id, temperature=temperature, streaming=True
+        )
         # 用无状态 build_enabled_tools（而非每轮预开 MCP 会话的 _cm 版）：MCP 工具清单走
         # 进程内缓存、不预握手，只有模型真正调用某个 MCP 工具时才连接——闲聊/只用内置工具
         # 的轮次零 MCP 握手，大幅降低首字延迟。
@@ -718,7 +801,7 @@ class ChatService:
                 yield ev
 
         if citations:
-            yield {"type": "citation", "citations": citations}
+            yield {"type": "citation", "citations": _number_citations(citations)}
 
     async def _save_partial_on_error(
         self,
@@ -761,32 +844,26 @@ class ChatService:
 
         大图先压缩（缩放 + 重编码），避免 base64 过大触发多模态接口 400/超限。
         """
-        import base64
-
-        from langchain_core.messages import HumanMessage, SystemMessage
-
         config = await get_default_config_for_type(
             self.session, user_id, "multimodal", "多模态"
         )
+        if CAP_VISION not in (config.capability or []):
+            from app.core.exceptions import BizError
+
+            raise BizError(
+                "默认多模态模型未声明 vision 能力，请在模型配置中启用图片理解",
+                code=2011,
+            )
         model = build_chat_model(config, temperature=0.7, streaming=True)
 
-        storage = get_storage()
         content_parts: list[dict] = [{"type": "text", "text": user_text}]
-        for key in image_keys[:4]:  # 单轮最多 4 张
-            try:
-                raw = await storage.get(key)
-                from pathlib import Path
-
-                from app.core.rag.image_compress import compress_for_vision
-
-                data, mime = compress_for_vision(raw, Path(key).suffix)
-                b64 = base64.b64encode(data).decode()
-                content_parts.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime};base64,{b64}"},
-                })
-            except Exception as e:
-                logger.warning("读取/压缩对话图片失败（跳过）: %s", e)
+        current_parts, _ = await self._load_vision_image_parts(
+            user_id,
+            image_keys,
+            byte_budget=settings.chat_image_max_bytes * settings.chat_image_max_count,
+            max_count=settings.chat_image_max_count,
+        )
+        content_parts.extend(current_parts)
 
         messages: list = []
         if system_prompt:
@@ -934,7 +1011,9 @@ class ChatService:
             return
 
         body = ChatStreamRequest(
-            conversation_id=conv.id, message=user_msg.content
+            conversation_id=conv.id,
+            message=user_msg.content,
+            image_keys=list((user_msg.meta_data or {}).get("image_keys") or []),
         )
         # 复用流式问答；但用户消息已存在，这里跳过再次落 user 消息
         async for chunk in self.stream_chat(user_id, body, skip_user_message=True):

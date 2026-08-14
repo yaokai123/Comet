@@ -4,6 +4,7 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.exceptions import BizError
 from app.core.logging import get_logger
 from app.core.rag.es_store import delete_by_source
@@ -16,8 +17,7 @@ from app.repositories.tag_repository import TagRepository
 
 logger = get_logger(__name__)
 
-SUPPORTED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
+SUPPORTED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 class ImageService:
@@ -53,8 +53,8 @@ class ImageService:
         ext = Path(file_name).suffix.lower()
         if ext not in SUPPORTED_IMAGE_EXTS:
             raise BizError(f"不支持的图片类型: {ext}", code=3020)
-        if len(content) > MAX_IMAGE_SIZE:
-            raise BizError("图片超过 20MB 限制", code=3021)
+        if len(content) > settings.chat_image_max_bytes:
+            raise BizError("图片超过 10MB 限制", code=3021)
 
         resolved_kb = await self._resolve_kb_id(user_id, kb_id)
         img_id = uuid.uuid4()
@@ -126,13 +126,51 @@ class ImageService:
     async def get_detail(self, user_id: uuid.UUID, image_id: uuid.UUID) -> Image:
         return await self._get_or_404(user_id, image_id)
 
+    async def thumbnail(self, user_id: uuid.UUID, image_id: uuid.UUID) -> bytes:
+        """生成带归属校验的轻量 JPEG 缩略图。"""
+        import io
+
+        from PIL import Image as PillowImage
+        from PIL import ImageOps
+
+        img = await self._get_or_404(user_id, image_id)
+        raw = await get_storage().get(img.file_key)
+        with PillowImage.open(io.BytesIO(raw)) as source:
+            source = ImageOps.exif_transpose(source).convert("RGB")
+            source.thumbnail((480, 480))
+            output = io.BytesIO()
+            source.save(output, format="JPEG", quality=82, optimize=True)
+            return output.getvalue()
+
     async def search(
-        self, user_id: uuid.UUID, query: str, top_k: int
+        self,
+        user_id: uuid.UUID,
+        query: str,
+        top_k: int,
+        min_vector_score: float | None = None,
     ) -> list[dict]:
         """图片语义检索：ES 召回阶段即限定 source_type=image。"""
-        return await hybrid_search(
-            self.session, user_id, query, top_k=top_k, source_type="image"
+        hits = await hybrid_search(
+            self.session,
+            user_id,
+            query,
+            top_k=top_k,
+            source_type="image",
+            min_vector_score=min_vector_score,
         )
+        storage = get_storage()
+        for index, hit in enumerate(hits, start=1):
+            hit["citation_index"] = index
+            try:
+                image_id = uuid.UUID(str(hit.get("source_id")))
+                image = await self.repo.get(user_id, image_id)
+            except (TypeError, ValueError):
+                image = None
+            hit["image_url"] = storage.get_url(image.file_key) if image else None
+            hit["thumbnail_url"] = (
+                f"/api/images/{image.id}/thumbnail" if image else None
+            )
+        return hits
 
     async def delete(self, user_id: uuid.UUID, image_id: uuid.UUID) -> None:
         img = await self._get_or_404(user_id, image_id)

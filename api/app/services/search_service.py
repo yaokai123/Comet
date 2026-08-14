@@ -36,8 +36,12 @@ class SearchService:
 
     async def _search_images(self, user_id: uuid.UUID, query: str, top_k: int):
         try:
-            return await hybrid_search(
-                self.session, user_id, query, top_k=top_k, source_type="image",
+            from app.services.image_service import ImageService
+
+            return await ImageService(self.session).search(
+                user_id,
+                query,
+                top_k,
                 min_vector_score=settings.global_search_min_vector_score,
             )
         except Exception as e:

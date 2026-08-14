@@ -131,10 +131,15 @@ async def upload_chat_image(
 ):
     """对话多模态：上传图片，返回 file_key（随消息一起发）与可访问 url。"""
     import uuid as _uuid
-    from pathlib import Path
+    from app.config import settings
+    from app.core.rag.chat_images import validate_chat_image_upload
 
-    content = await file.read()
-    ext = Path(file.filename or "img.jpg").suffix.lower() or ".jpg"
+    content = await file.read(settings.chat_image_max_bytes + 1)
+    ext = validate_chat_image_upload(
+        filename=file.filename or "image",
+        content_type=file.content_type,
+        content=content,
+    )
     file_key = build_file_key(str(user.id), "chat", str(_uuid.uuid4()), ext)
     storage = get_storage()
     await storage.save(file_key, content)

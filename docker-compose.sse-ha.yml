@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: comet
+      POSTGRES_PASSWORD: comet
+      POSTGRES_DB: comet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U comet"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+
+  migrate:
+    build: ./api
+    command: alembic upgrade head
+    environment: &probe_env
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: comet
+      POSTGRES_PASSWORD: comet
+      POSTGRES_DB: comet
+      REDIS_URL: redis://redis:6379/0
+      STREAM_FORWARD_SECRET: sse-ha-test-secret
+      STREAM_ROUTE_TTL_SECONDS: 15
+      STREAM_POLL_INTERVAL_SECONDS: 0.25
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api1:
+    build: ./api
+    command: uvicorn eval.sse_ha_app:app --host 0.0.0.0 --port 8000
+    environment:
+      <<: *probe_env
+      STREAM_INSTANCE_ID: api1
+      STREAM_INTERNAL_URL: http://api1:8000
+    ports:
+      - "127.0.0.1:18001:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+  api2:
+    build: ./api
+    command: uvicorn eval.sse_ha_app:app --host 0.0.0.0 --port 8000
+    environment:
+      <<: *probe_env
+      STREAM_INSTANCE_ID: api2
+      STREAM_INTERNAL_URL: http://api2:8000
+    ports:
+      - "127.0.0.1:18002:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+  lb:
+    image: nginx:1.27-alpine
+    ports:
+      - "127.0.0.1:18080:80"
+    volumes:
+      - ./docker/nginx/sse-ha.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api1
+      - api2

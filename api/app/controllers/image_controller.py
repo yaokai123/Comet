@@ -2,6 +2,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,9 +28,21 @@ async def upload_image(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    content = await file.read()
+    from pathlib import Path
+
+    from app.config import settings
+    from app.core.rag.chat_images import validate_chat_image_upload
+
+    content = await file.read(settings.chat_image_max_bytes + 1)
+    ext = validate_chat_image_upload(
+        filename=file.filename or "image",
+        content_type=file.content_type,
+        content=content,
+    )
+    original = Path(file.filename or "image")
+    normalized_name = f"{original.stem or 'image'}{ext}"
     service = ImageService(session)
-    img = await service.upload(user.id, file.filename or "image", content, kb_id)
+    img = await service.upload(user.id, normalized_name, content, kb_id)
     return success(await service.to_out_dict(img), "上传成功，正在处理")
 
 
@@ -81,6 +94,20 @@ async def get_image(
     service = ImageService(session)
     img = await service.get_detail(user.id, image_id)
     return success(await service.to_out_dict(img))
+
+
+@router.get("/{image_id}/thumbnail")
+async def get_image_thumbnail(
+    image_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    content = await ImageService(session).thumbnail(user.id, image_id)
+    return Response(
+        content=content,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.delete("/{image_id}")

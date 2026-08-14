@@ -410,3 +410,30 @@
   border-color: var(--comet-primary);
   color: var(--comet-primary);
 }
+
+.chat-image-citation {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 3px 8px 3px 3px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #fff;
+  color: #475467;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-image-citation img {
+  width: 32px;
+  height: 32px;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.chat-image-citation span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

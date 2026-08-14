@@ -96,7 +96,7 @@ async def federated_retrieve(
     for provider, evidence, error in responses:
         for item in evidence:
             item.authority = provider.authority
-            item.source_type = provider.source_type
+            item.source_type = item.source_type or provider.source_type
             item.source_name = provider.name
         candidates.extend(evidence)
         source_status.append(
@@ -142,6 +142,11 @@ def format_federated_result(result: dict[str, Any]) -> str:
                 item.content,
             ]
         )
+        if item.source_type == "image" and item.metadata.get("citation_index"):
+            lines.append(
+                f"图片引用编号=[{item.metadata['citation_index']}]；"
+                "回答涉及该图片时必须使用同一编号。"
+            )
     if conflicts:
         lines.append("\n## 来源冲突与采用建议")
         for item in conflicts:

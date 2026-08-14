@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Button,
@@ -54,6 +54,10 @@ import { useSkillStore } from '@/stores/skillStore'
 import { isUuid } from '@/utils/uuid'
 import { productEventApi } from '@/api/productEvents'
 
+const CHAT_IMAGE_MAX_COUNT = 6
+const CHAT_IMAGE_MAX_BYTES = 10 * 1024 * 1024
+const CHAT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+
 export default function ChatPage() {
 const [params, setParams] = useSearchParams()
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -67,6 +71,7 @@ const [params, setParams] = useSearchParams()
   const [webSearch, setWebSearch] = useState(false)
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null)
   const [pendingImages, setPendingImages] = useState<{ key: string; url: string }[]>([])
+  const pendingImagesRef = useRef<{ key: string; url: string }[]>([])
   const [pendingFiles, setPendingFiles] = useState<
     { file_name: string; text: string }[]
   >([])
@@ -616,9 +621,23 @@ const [params, setParams] = useSearchParams()
   }
 
   const onUploadImage = async (file: File) => {
+    if (!CHAT_IMAGE_TYPES.has(file.type)) {
+      antdMessage.error('仅支持 JPEG、PNG、WEBP 图片')
+      return Upload.LIST_IGNORE
+    }
+    if (file.size > CHAT_IMAGE_MAX_BYTES) {
+      antdMessage.error('单张图片不得超过 10MB')
+      return Upload.LIST_IGNORE
+    }
+    if (pendingImagesRef.current.length >= CHAT_IMAGE_MAX_COUNT) {
+      antdMessage.warning(`单轮最多上传 ${CHAT_IMAGE_MAX_COUNT} 张图片`)
+      return Upload.LIST_IGNORE
+    }
     try {
       const { data } = await chatApi.uploadImage(file)
-      setPendingImages((prev) => [...prev, { key: data.file_key, url: data.url }])
+      const next = [...pendingImagesRef.current, { key: data.file_key, url: data.url }]
+      pendingImagesRef.current = next
+      setPendingImages(next)
     } catch (e) {
       antdMessage.error((e as Error).message)
     }
@@ -688,6 +707,17 @@ const [params, setParams] = useSearchParams()
     }
   }
 
+  const onPaste = (e: ClipboardEvent<HTMLDivElement>) => {
+    const images = Array.from(e.clipboardData.files).filter((file) =>
+      file.type.startsWith('image/'),
+    )
+    if (!images.length) return
+    e.preventDefault()
+    void (async () => {
+      for (const file of images) await onUploadImage(file)
+    })()
+  }
+
   const onSend = async (overrideText?: string) => {
     const text = (overrideText ?? input).trim()
     if (!text || sending) return
@@ -702,6 +732,7 @@ const [params, setParams] = useSearchParams()
     const imgs = pendingImages
     const files = pendingFiles
     setPendingImages([])
+    pendingImagesRef.current = []
     setPendingFiles([])
 
     // 先插入用户消息 + 占位的 AI 消息
@@ -774,6 +805,20 @@ const [params, setParams] = useSearchParams()
             prev.map((m) => (m.id === aiMsg.id ? { ...m, citations: cites } : m)),
           )
         },
+        onResume: (d) => {
+          citationCount = d.citations?.length ?? citationCount
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiMsg.id
+                ? {
+                    ...m,
+                    content: d.content || '',
+                    citations: d.citations ?? m.citations,
+                  }
+                : m,
+            ),
+          )
+        },
         onTrace: (d) => {
           // 这一轮对话的执行轨迹 id —— 给 AI 气泡加「查看执行轨迹」按钮用
           setMessages((prev) =>
@@ -802,6 +847,32 @@ const [params, setParams] = useSearchParams()
           }
           if (captureDocumentId) pendingCaptureDocIdRef.current = null
           loadConversations()
+        },
+        onIdle: () => {
+          if (!convId) return
+          void chatApi.listMessages(convId).then(({ data }) => {
+            const last = data[data.length - 1]
+            if (last?.role === 'assistant') {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === aiMsg.id
+                    ? {
+                        ...m,
+                        id: last.id,
+                        content: last.content,
+                        citations: last.meta_data?.citations,
+                        toolCalls: last.meta_data?.tool_calls,
+                        streaming: false,
+                        conversationId: convId,
+                        createdAt: last.created_at,
+                      }
+                    : m,
+                ),
+              )
+            }
+            setSending(false)
+            loadConversations()
+          })
         },
         onError: (msg) => {
           settleRunningToolRuns(aiMsg.id, 'error')
@@ -968,6 +1039,7 @@ const [params, setParams] = useSearchParams()
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
+        onPaste={onPaste}
       >
         {dragOver && (
           <div className="chat-drop-overlay">
@@ -1128,7 +1200,11 @@ const [params, setParams] = useSearchParams()
                       style={{ width: 64, height: 64, borderRadius: 10, objectFit: 'cover' }}
                     />
                     <DeleteOutlined
-                      onClick={() => setPendingImages((prev) => prev.filter((_, idx) => idx !== i))}
+                      onClick={() => {
+                        const next = pendingImagesRef.current.filter((_, idx) => idx !== i)
+                        pendingImagesRef.current = next
+                        setPendingImages(next)
+                      }}
                       style={{
                         position: 'absolute',
                         top: -6,

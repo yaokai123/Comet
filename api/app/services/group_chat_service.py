@@ -562,6 +562,10 @@ class GroupChatService:
         )
         text = body.message.strip()
         image_keys = list(body.image_keys or [])
+        if image_keys:
+            from app.core.rag.chat_images import validate_chat_image_keys
+
+            await validate_chat_image_keys(user_id, image_keys)
 
         user_meta: dict = {"sender_name": nickname, "sender_user_id": str(user_id)}
         if image_keys:
@@ -869,6 +873,10 @@ class GroupChatService:
 
             # 本轮图片（多模态看图）：存进 user 消息 meta_data，供历史还原与分享
             image_keys = list(body.image_keys or [])
+            if image_keys:
+                from app.core.rag.chat_images import validate_chat_image_keys
+
+                await validate_chat_image_keys(user_id, image_keys)
             user_meta = {"image_keys": image_keys} if image_keys else None
             # 落库用户消息
             await self.msg_repo.add(

@@ -18,14 +18,14 @@ class GroupChatStreamRequest(BaseModel):
     conversation_id: uuid.UUID
     message: str = Field(..., min_length=1)
     # 多模态：图片 file_key 列表（带图时每个角色用多模态模型看图发言）
-    image_keys: list[str] = Field(default_factory=list)
+    image_keys: list[str] = Field(default_factory=list, max_length=6)
 
 
 class GroupSayRequest(BaseModel):
     """多人实时群聊：某真人成员发言。落库后广播，后台触发 AI 接话。"""
 
     message: str = Field(..., min_length=1)
-    image_keys: list[str] = Field(default_factory=list)
+    image_keys: list[str] = Field(default_factory=list, max_length=6)
 
 
 class GroupJoinRequest(BaseModel):
@@ -39,4 +39,3 @@ class GroupToolsRequest(BaseModel):
     """群主开/关本群工具（知识库/记忆/联网/MCP）。"""
 
     enabled: bool
-

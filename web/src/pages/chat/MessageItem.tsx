@@ -280,11 +280,28 @@ export default function MessageItem({
             {msg.citations && msg.citations.length > 0 && (
               <Space size={[4, 4]} wrap style={{ marginBottom: 4 }}>
                 <span style={{ fontSize: 12, color: '#667085' }}>引用：</span>
-                {msg.citations.map((c, i) => (
-                  <Tag key={i} color="default" className="chat-citation-tag" onClick={() => openCitation(c.source_id, c.doc_name, c.source_type)}>
-                    {c.source_type === 'image' ? '🖼️' : '📄'} {c.doc_name || c.source_id}
-                  </Tag>
-                ))}
+                {msg.citations.map((c, i) => {
+                  const number = c.citation_index ?? i + 1
+                  if (c.source_type === 'image' && c.thumbnail_url) {
+                    return (
+                      <button
+                        key={`${c.source_id}-${number}`}
+                        type="button"
+                        className="chat-image-citation"
+                        onClick={() => openCitation(c.source_id, c.doc_name, c.source_type)}
+                        title={`[${number}] ${c.doc_name || '图片引用'}`}
+                      >
+                        <AuthenticatedImage src={c.thumbnail_url} alt={c.doc_name || ''} />
+                        <span>[{number}] {c.doc_name || '图片引用'}</span>
+                      </button>
+                    )
+                  }
+                  return (
+                    <Tag key={`${c.source_id}-${number}`} color="default" className="chat-citation-tag" onClick={() => openCitation(c.source_id, c.doc_name, c.source_type)}>
+                      [{number}] {c.source_type === 'image' ? '🖼️' : '📄'} {c.doc_name || c.source_id}
+                    </Tag>
+                  )
+                })}
               </Space>
             )}
             {!msg.streaming && msg.content && (

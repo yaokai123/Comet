@@ -20,8 +20,12 @@ def compress_for_vision(raw: bytes, file_ext: str) -> tuple[bytes, str]:
     返回 (字节, mime)。小图或压缩失败时返回原图。
     """
     ext = (file_ext or "").lower()
-    is_png = ext in (".png", "png")
-    mime = "image/png" if is_png else "image/jpeg"
+    mime = {
+        ".png": "image/png",
+        "png": "image/png",
+        ".webp": "image/webp",
+        "webp": "image/webp",
+    }.get(ext, "image/jpeg")
     if len(raw) <= _TARGET_BYTES:
         return raw, mime
     try:

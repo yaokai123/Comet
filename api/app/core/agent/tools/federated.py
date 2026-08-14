@@ -80,7 +80,7 @@ async def build_federated_tool(
             return [
                 QualityEvidence(
                     evidence_id=evidence_id("企业知识库", item["content"]),
-                    source_type="knowledge_base",
+                    source_type=item.get("source_type") or "knowledge_base",
                     source_name="企业知识库",
                     content=item["content"],
                     authority=0.88,
@@ -129,8 +129,29 @@ async def build_federated_tool(
                 continue
             existing.add(item.evidence_id)
             metadata = item.metadata
+            citation_index = len(citations) + 1
+            image_url = None
+            thumbnail_url = None
+            if item.source_type == "image":
+                try:
+                    import uuid
+
+                    from app.core.storage import get_storage
+                    from app.repositories.image_repository import ImageRepository
+
+                    image_id = uuid.UUID(str(metadata.get("source_id")))
+                    image = await ImageRepository(session).get(user_id, image_id)
+                    if image is not None:
+                        image_url = get_storage().get_url(image.file_key)
+                        thumbnail_url = f"/api/images/{image.id}/thumbnail"
+                except (TypeError, ValueError):
+                    pass
+            metadata["citation_index"] = citation_index
+            metadata["image_url"] = image_url
+            metadata["thumbnail_url"] = thumbnail_url
             citations.append(
                 {
+                    "citation_index": citation_index,
                     "evidence_id": item.evidence_id,
                     "source_id": metadata.get("source_id") or item.evidence_id,
                     "source_type": item.source_type,
@@ -140,6 +161,8 @@ async def build_federated_tool(
                     "rationale": item.rationale,
                     "document_version_id": metadata.get("document_version_id"),
                     "chunk_id": metadata.get("chunk_id"),
+                    "image_url": image_url,
+                    "thumbnail_url": thumbnail_url,
                 }
             )
         initial_count = sum(item["count"] for item in result["sources"])

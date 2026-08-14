@@ -39,3 +39,23 @@ cd D:\Comet-main\api
 
 多 API 实例部署时，每个实例配置唯一 `STREAM_INSTANCE_ID`、可被其他实例访问的
 `STREAM_INTERNAL_URL`，并共享同一个高强度 `STREAM_FORWARD_SECRET`。内部通知路由不应暴露到公网。
+
+## 浏览器恢复与图片上下文
+
+浏览器 GET SSE 使用带抖动的指数退避自动重连，`online` 和页面重新可见事件会立即重建连接；初次 POST
+流断开后会自动切换到同一会话的 GET 续传，不会重复提交用户消息。
+
+对话图片只允许 JPEG、PNG、WEBP，单张不超过 10MB、单轮最多 6 张。后端同时校验真实图片内容、扩展名、
+对象是否存在以及 file key 的用户归属。视觉路由会扫描最近 20 轮历史；历史图片按原消息聚合回放，优先保留
+最近图片，并受 8 张、压缩后 12MB 的总预算约束。
+
+图片检索证据包含统一 `citation_index`、鉴权原图 URL 和鉴权缩略图 URL，回答页按同一编号展示缩略图引用。
+
+## 多实例故障测试
+
+以下脚本会启动隔离的 PostgreSQL、Redis、两个 API 探针实例和 Nginx，验证刷新、客户端断连重连、负载均衡
+以及停止一个实例后的游标续传，结束后自动删除测试卷：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\Comet-main\scripts\test-sse-ha.ps1
+```
