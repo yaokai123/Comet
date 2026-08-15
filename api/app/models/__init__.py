@@ -7,6 +7,7 @@ from app.models.agent_config_model import AgentConfig
 from app.models.agent_persona_model import AgentPersona
 from app.models.agent_task_model import AgentTask
 from app.models.agent_trace_model import AgentSpan, AgentTrace
+from app.models.chat_image_upload_model import ChatImageUpload
 from app.models.conversation_model import Conversation, Message
 from app.models.conversation_share_model import ConversationShare
 from app.models.daily_review_model import DailyReview
@@ -54,6 +55,7 @@ __all__ = [
     "AgentTask",
     "AgentSpan",
     "AgentTrace",
+    "ChatImageUpload",
     "Conversation",
     "Message",
     "ConversationShare",

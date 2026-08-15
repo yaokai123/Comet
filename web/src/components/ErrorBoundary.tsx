@@ -27,7 +27,6 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     // 控制台同时打一份,方便 F12 看完整堆栈
-    // eslint-disable-next-line no-console
     console.error('[ErrorBoundary] 渲染失败:', error, info)
     this.setState({ info })
   }

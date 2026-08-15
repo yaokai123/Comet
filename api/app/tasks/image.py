@@ -54,6 +54,11 @@ async def _process(session: AsyncSession, image_id: str, img_uuid: uuid.UUID) ->
 
         content = await get_storage().get(img.file_key)
 
+        # 入库阶段预生成缩略图；后续历史引用只读取缓存，不重复解码原图。
+        from app.services.image_service import ImageService
+
+        await ImageService(session)._ensure_thumbnail(img)
+
         # 多模态描述（用用户默认多模态模型）
         vision_client = await get_client_for_type(session, img.user_id, "multimodal")
         info = await describe_image(vision_client, content, img.file_ext)

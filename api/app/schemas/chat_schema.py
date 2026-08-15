@@ -24,6 +24,8 @@ class ChatStreamRequest(BaseModel):
     """发送消息（SSE 流式）。conversation_id 为空则自动新建会话。"""
 
     conversation_id: uuid.UUID | None = None
+    # 客户端为一次“发送”生成并在重试时复用；服务端据此保证消息、模型调用和费用幂等。
+    client_request_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     project_id: uuid.UUID | None = None
     message: str = Field(..., min_length=1)
     # AI 主动开场白（今日回顾「聊聊」带入）：新会话首轮时先作为 assistant 消息落库，

@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test:visual": "playwright test",
+    "test:sse-ha": "playwright test -c playwright.ha.config.ts",
     "test:visual:update": "playwright test --update-snapshots"
   },
   "dependencies": {

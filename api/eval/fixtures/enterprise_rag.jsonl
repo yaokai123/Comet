@@ -1,0 +1,8 @@
+{"query_id":"doc-001","scenario":"document","question":"制度的正式生效日期是什么？","gold_source_ids":["policy-v3-chunk-12"]}
+{"query_id":"doc-002","scenario":"document","question":"设备巡检由哪个部门负责？","gold_source_ids":["manual-chunk-31"]}
+{"query_id":"table-001","scenario":"table","question":"2025年华东区域的营业收入是多少？","gold_source_ids":["annual-table-4-row-east"]}
+{"query_id":"table-002","scenario":"table","question":"A型设备在高温工况下的允许压力是多少？","gold_source_ids":["spec-table-8-row-a-high"]}
+{"query_id":"image-001","scenario":"image","question":"流程图中审批失败后回到哪个步骤？","gold_source_ids":["process-figure-6"]}
+{"query_id":"image-002","scenario":"image","question":"设备照片里红色指示灯位于什么位置？","gold_source_ids":["device-photo-11"]}
+{"query_id":"cross-page-table-001","scenario":"cross_page_table","question":"跨页清单中部件X-27的更换周期是多少？","gold_source_ids":["maintenance-table-15-row-x27"]}
+{"query_id":"cross-page-table-002","scenario":"cross_page_table","question":"跨页财务表中合计负债是多少？","gold_source_ids":["finance-table-9-total-liability"]}

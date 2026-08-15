@@ -75,6 +75,7 @@ export interface ChatMessage {
 
 export interface SendOptions {
   conversationId?: string
+  clientRequestId?: string
   message: string
   skillId?: string | null
   greeting?: string | null
@@ -122,8 +123,10 @@ export const chatApi = {
   renameConversation(id: string, title: string) {
     return client.put<unknown, Wrapped<Conversation>>(`/conversations/${id}`, { title })
   },
-  deleteConversation(id: string) {
-    return client.delete<unknown, Wrapped<null>>(`/conversations/${id}`)
+  async deleteConversation(id: string) {
+    const result = await client.delete<unknown, Wrapped<null>>(`/conversations/${id}`)
+    localStorage.removeItem(`chat:last-event:${id}`)
+    return result
   },
   listMessages(id: string) {
     return client.get<unknown, Wrapped<ChatMessage[]>>(`/conversations/${id}/messages`)
@@ -476,10 +479,12 @@ export async function streamChat(
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
+  const clientRequestId = opts.clientRequestId ?? crypto.randomUUID()
   await streamSSE(
     '/api/chat/stream',
     {
       conversation_id: opts.conversationId ?? null,
+      client_request_id: clientRequestId,
       message: opts.message,
       skill_id: opts.skillId ?? null,
       greeting: opts.greeting ?? null,
@@ -544,7 +549,33 @@ export async function subscribeChatEvents(
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const cursorKey = `chat:last-event:${convId}`
+  return subscribeDurableEvents(
+    `/api/chat/${convId}/events`,
+    `chat:last-event:${convId}`,
+    handlers,
+    signal,
+  )
+}
+
+export async function subscribeChatRequestEvents(
+  clientRequestId: string,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  return subscribeDurableEvents(
+    `/api/chat/runs/by-request/${clientRequestId}/events`,
+    `chat:last-request-event:${clientRequestId}`,
+    handlers,
+    signal,
+  )
+}
+
+async function subscribeDurableEvents(
+  url: string,
+  cursorKey: string,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
   let attempt = 0
   while (!signal?.aborted) {
     const token = localStorage.getItem('access_token')
@@ -568,7 +599,7 @@ export async function subscribeChatEvents(
     let terminal = false
     let receivedEvent = false
     try {
-      const resp = await fetch(`/api/chat/${convId}/events`, {
+      const resp = await fetch(url, {
         method: 'GET',
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -612,6 +643,7 @@ export async function subscribeChatEvents(
           if (eventId) localStorage.setItem(cursorKey, eventId)
           dispatchEvent(event, payload, handlers)
           if (event === 'done' || event === 'error' || event === 'idle') {
+            localStorage.removeItem(cursorKey)
             terminal = true
             return
           }
@@ -665,6 +697,7 @@ async function streamSSE(
   const decoder = new TextDecoder()
   let buffer = ''
   let streamConversationId = body.conversation_id as string | undefined
+  const clientRequestId = body.client_request_id as string | undefined
   let terminal = false
 
   while (true) {
@@ -703,14 +736,27 @@ async function streamSSE(
       if (eventId && streamConversationId) {
         localStorage.setItem(`chat:last-event:${streamConversationId}`, eventId)
       }
+      if (eventId && clientRequestId) {
+        localStorage.setItem(`chat:last-request-event:${clientRequestId}`, eventId)
+      }
       dispatchEvent(event, payload, handlers)
-      if (event === 'done' || event === 'error' || event === 'idle') terminal = true
+      if (event === 'done' || event === 'error' || event === 'idle') {
+        terminal = true
+        if (streamConversationId) {
+          localStorage.removeItem(`chat:last-event:${streamConversationId}`)
+        }
+        if (clientRequestId) {
+          localStorage.removeItem(`chat:last-request-event:${clientRequestId}`)
+        }
+      }
     }
   }
   if (!terminal && streamConversationId && !signal?.aborted) {
     await subscribeChatEvents(streamConversationId, handlers, signal)
-  } else if (!terminal && !streamConversationId && !signal?.aborted) {
-    handlers.onError?.('连接在会话创建前中断，请重新发送')
+  } else if (!terminal && clientRequestId && !signal?.aborted) {
+    await subscribeChatRequestEvents(clientRequestId, handlers, signal)
+  } else if (!terminal && !signal?.aborted) {
+    handlers.onError?.('连接在会话创建前中断，且请求缺少恢复标识')
   }
 }
 

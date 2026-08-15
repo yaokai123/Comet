@@ -15,7 +15,11 @@ from app.core.rag.chat_images import (
     validate_chat_image_upload,
 )
 from app.schemas.chat_schema import ChatStreamRequest
-from app.services.chat_service import ChatService, _number_citations
+from app.services.chat_service import (
+    ChatService,
+    _number_citations,
+    _requires_history_vision,
+)
 
 
 def _png_bytes(size=(32, 32)) -> bytes:
@@ -26,12 +30,12 @@ def _png_bytes(size=(32, 32)) -> bytes:
 
 def test_upload_validation_uses_real_image_content():
     content = _png_bytes()
-    assert (
-        validate_chat_image_upload(
-            filename="safe.png", content_type="image/png", content=content
-        )
-        == ".png"
+    validated = validate_chat_image_upload(
+        filename="safe.png", content_type="image/png", content=content
     )
+    assert validated.extension == ".png"
+    assert validated.width == validated.height == 32
+    assert b"exif" not in validated.content.lower()
     with pytest.raises(BizError):
         validate_chat_image_upload(
             filename="fake.jpg", content_type="image/jpeg", content=content
@@ -41,6 +45,28 @@ def test_upload_validation_uses_real_image_content():
 def test_chat_request_rejects_more_than_six_images():
     with pytest.raises(ValidationError):
         ChatStreamRequest(message="看图", image_keys=[str(index) for index in range(7)])
+
+
+def test_chat_request_gets_stable_client_request_id():
+    request_id = uuid.uuid4()
+    first = ChatStreamRequest(message="幂等", client_request_id=request_id)
+    retry = ChatStreamRequest.model_validate(first.model_dump())
+    assert first.client_request_id == request_id
+    assert retry.client_request_id == request_id
+
+
+def test_chat_request_generates_request_id_for_legacy_client():
+    assert isinstance(ChatStreamRequest(message="兼容旧客户端").client_request_id, uuid.UUID)
+
+
+@pytest.mark.parametrize("query", ["这张图说明了什么", "上面的表格里有什么", "再仔细看一下细节"])
+def test_history_vision_requires_explicit_visual_reference(query):
+    assert _requires_history_vision(query, True)
+
+
+def test_unrelated_followup_does_not_resend_history_images():
+    assert not _requires_history_vision("帮我把结论整理成邮件", True)
+    assert not _requires_history_vision("这张图是什么", False)
 
 
 def test_image_key_validation_enforces_owner_and_existence(monkeypatch):

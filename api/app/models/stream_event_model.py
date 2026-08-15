@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, String, Text, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,12 +14,18 @@ from app.db.postgres import Base
 
 class StreamRun(Base):
     __tablename__ = "stream_runs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "client_request_id", name="uq_stream_runs_user_request"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     stream_type: Mapped[str] = mapped_column(String(32), index=True)
     stream_key: Mapped[str] = mapped_column(String(128), index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    client_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
     )
     status: Mapped[str] = mapped_column(String(24), default="running", index=True)
     final_message_id: Mapped[uuid.UUID | None] = mapped_column(

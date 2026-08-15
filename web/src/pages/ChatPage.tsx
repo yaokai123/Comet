@@ -767,9 +767,11 @@ const [params, setParams] = useSearchParams()
     const controller = new AbortController()
     sendAbortRef.current = controller
     let citationCount = 0
+    const clientRequestId = crypto.randomUUID()
     await streamChat(
       {
         conversationId: convId,
+        clientRequestId,
         message: text,
         skillId: activeSkillId,
         greeting: pendingGreetingRef.current,

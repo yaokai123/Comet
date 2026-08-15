@@ -101,10 +101,18 @@ class Settings(BaseSettings):
     stream_forward_secret: str = ""
     stream_route_ttl_seconds: int = 60
     stream_poll_interval_seconds: float = 0.75
+    stream_token_flush_chars: int = 128
+    stream_token_flush_ms: int = 80
     stream_event_retention_hours: int = 24
+    stream_event_compact_hours: int = 1
     stream_run_stale_seconds: int = 1800
     chat_image_max_count: int = 6
     chat_image_max_bytes: int = 10 * 1024 * 1024
+    chat_image_max_dimension: int = 12000
+    chat_image_max_pixels: int = 40_000_000
+    chat_image_daily_max_count: int = 100
+    chat_image_daily_max_bytes: int = 500 * 1024 * 1024
+    chat_image_orphan_hours: int = 24
     vision_history_image_max_count: int = 8
     vision_history_image_budget_bytes: int = 12 * 1024 * 1024
 

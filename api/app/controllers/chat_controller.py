@@ -124,25 +124,71 @@ async def chat_resume_events(
     )
 
 
+@router.get("/chat/runs/by-request/{client_request_id}/events")
+async def chat_resume_request_events(
+    client_request_id: uuid.UUID,
+    last_event_id: str | None = Header(None, alias="Last-Event-ID"),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """首次 POST 在会话 meta 前断线时，按客户端请求 ID 找回同一次生成。"""
+    try:
+        after_event_id = max(0, int(last_event_id or 0))
+    except ValueError:
+        after_event_id = 0
+    return StreamingResponse(
+        ChatService(session).resume_request_events(
+            user.id, client_request_id, after_event_id
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/chat/upload-image")
 async def upload_chat_image(
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
 ):
     """对话多模态：上传图片，返回 file_key（随消息一起发）与可访问 url。"""
     import uuid as _uuid
     from app.config import settings
-    from app.core.rag.chat_images import validate_chat_image_upload
+    from app.core.rag.chat_images import (
+        record_temporary_chat_image,
+        reserve_chat_image_quota,
+        validate_chat_image_upload,
+    )
 
     content = await file.read(settings.chat_image_max_bytes + 1)
-    ext = validate_chat_image_upload(
-        filename=file.filename or "image",
-        content_type=file.content_type,
-        content=content,
+    try:
+        validated = validate_chat_image_upload(
+            filename=file.filename or "image",
+            content_type=file.content_type,
+            content=content,
+        )
+    except Exception:
+        from app.core.observability.sse_metrics import runtime_metrics
+
+        runtime_metrics.inc("image_validation_rejected_total")
+        raise
+    await reserve_chat_image_quota(user.id, len(validated.content))
+    file_key = build_file_key(
+        str(user.id), "chat", str(_uuid.uuid4()), validated.extension
     )
-    file_key = build_file_key(str(user.id), "chat", str(_uuid.uuid4()), ext)
     storage = get_storage()
-    await storage.save(file_key, content)
+    await storage.save(file_key, validated.content)
+    try:
+        await record_temporary_chat_image(
+            session, user.id, file_key, len(validated.content)
+        )
+    except Exception:
+        await storage.delete(file_key)
+        raise
     return success({"file_key": file_key, "url": storage.get_url(file_key)})
 
 

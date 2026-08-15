@@ -31,6 +31,14 @@ async def health():
     )
 
 
+@router.get("/health/runtime-metrics")
+async def runtime_metrics_snapshot():
+    """进程级运行信号；多实例部署应逐实例采集后聚合。"""
+    from app.core.observability.sse_metrics import runtime_metrics
+
+    return success(runtime_metrics.snapshot())
+
+
 @router.get("/health/ready")
 async def ready(request: Request):
     """Readiness probe for Docker/orchestrators; partial startup is not ready."""

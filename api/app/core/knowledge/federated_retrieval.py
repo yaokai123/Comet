@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -84,6 +85,7 @@ async def federated_retrieve(
     rerank_client=None,
     chat_client=None,
 ) -> dict[str, Any]:
+    started = time.perf_counter()
     async def invoke(provider: FederatedProvider):
         try:
             return provider, await provider.call(query), None
@@ -116,6 +118,22 @@ async def federated_retrieve(
         chat_client=chat_client,
     )
     conflicts = _conflicts(quality.accepted)
+    from app.core.observability.sse_metrics import runtime_metrics
+
+    runtime_metrics.inc("federated_retrieval_total")
+    runtime_metrics.inc(
+        "federated_provider_error_total",
+        sum(1 for item in source_status if item["status"] == "error"),
+    )
+    runtime_metrics.inc("federated_conflict_total", len(conflicts))
+    runtime_metrics.observe("federated_candidates", len(candidates))
+    runtime_metrics.observe("federated_accepted", len(quality.accepted))
+    runtime_metrics.observe(
+        "federated_noise_rate", len(quality.rejected) / max(1, len(candidates))
+    )
+    runtime_metrics.observe(
+        "federated_latency_ms", (time.perf_counter() - started) * 1000
+    )
     return {
         "evidence": quality.accepted,
         "rejected": quality.rejected,

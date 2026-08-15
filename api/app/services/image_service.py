@@ -72,6 +72,10 @@ class ImageService:
             status=IMG_STATUS_PENDING,
         )
         await self.repo.create(img)
+        try:
+            await self._ensure_thumbnail(img)
+        except Exception as exc:
+            logger.warning("图片缩略图预生成失败，将由处理任务重试: %s", exc)
         await self._dispatch(img_id)
         logger.info("图片上传: user=%s id=%s name=%s", user_id, img_id, file_name)
         return img
@@ -103,6 +107,10 @@ class ImageService:
             status=IMG_STATUS_PENDING,
         )
         await self.repo.create(img)
+        try:
+            await self._ensure_thumbnail(img)
+        except Exception as exc:
+            logger.warning("对话图片缩略图预生成失败，将由处理任务重试: %s", exc)
         await self._dispatch(img.id)
         logger.info("对话图片入库: user=%s id=%s key=%s", user_id, img.id, file_key)
         return img
@@ -127,20 +135,48 @@ class ImageService:
         return await self._get_or_404(user_id, image_id)
 
     async def thumbnail(self, user_id: uuid.UUID, image_id: uuid.UUID) -> bytes:
-        """生成带归属校验的轻量 JPEG 缩略图。"""
+        """返回带归属校验、对象存储缓存的轻量 JPEG 缩略图。"""
+        img = await self._get_or_404(user_id, image_id)
+        return await self._ensure_thumbnail(img)
+
+    @staticmethod
+    def _thumbnail_key(img: Image) -> str:
+        return f"{img.user_id}/thumbnails/{img.id}.jpg"
+
+    async def _ensure_thumbnail(self, img: Image) -> bytes:
         import io
 
         from PIL import Image as PillowImage
         from PIL import ImageOps
 
-        img = await self._get_or_404(user_id, image_id)
-        raw = await get_storage().get(img.file_key)
+        storage = get_storage()
+        thumbnail_key = self._thumbnail_key(img)
+        if await storage.exists(thumbnail_key):
+            return await storage.get(thumbnail_key)
+        raw = await storage.get(img.file_key)
         with PillowImage.open(io.BytesIO(raw)) as source:
             source = ImageOps.exif_transpose(source).convert("RGB")
             source.thumbnail((480, 480))
             output = io.BytesIO()
             source.save(output, format="JPEG", quality=82, optimize=True)
-            return output.getvalue()
+            content = output.getvalue()
+        await storage.save(thumbnail_key, content)
+        return content
+
+    async def content(
+        self, user_id: uuid.UUID, image_id: uuid.UUID
+    ) -> tuple[bytes, str]:
+        """稳定鉴权原图接口；不把会过期的对象存储签名 URL 写入消息。"""
+        img = await self._get_or_404(user_id, image_id)
+        media_types = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp",
+        }
+        return await get_storage().get(img.file_key), media_types.get(
+            img.file_ext.lower(), "application/octet-stream"
+        )
 
     async def search(
         self,
@@ -158,7 +194,6 @@ class ImageService:
             source_type="image",
             min_vector_score=min_vector_score,
         )
-        storage = get_storage()
         for index, hit in enumerate(hits, start=1):
             hit["citation_index"] = index
             try:
@@ -166,7 +201,8 @@ class ImageService:
                 image = await self.repo.get(user_id, image_id)
             except (TypeError, ValueError):
                 image = None
-            hit["image_url"] = storage.get_url(image.file_key) if image else None
+            hit["image_id"] = str(image.id) if image else None
+            hit["image_url"] = f"/api/images/{image.id}/content" if image else None
             hit["thumbnail_url"] = (
                 f"/api/images/{image.id}/thumbnail" if image else None
             )
@@ -179,6 +215,10 @@ class ImageService:
             await get_storage().delete(img.file_key)
         except Exception as e:
             logger.warning("删除图片文件失败（忽略）: %s", e)
+        try:
+            await get_storage().delete(self._thumbnail_key(img))
+        except Exception as e:
+            logger.warning("删除图片缩略图失败（忽略）: %s", e)
         await self.repo.delete(img)
         logger.info("删除图片: user=%s id=%s", user_id, image_id)
 
@@ -208,7 +248,7 @@ class ImageService:
             "file_name": img.file_name,
             "file_ext": img.file_ext,
             "file_size": img.file_size,
-            "url": get_storage().get_url(img.file_key),
+            "url": f"/api/images/{img.id}/content",
             "description": img.description,
             "objects": img.objects,
             "scene": img.scene,

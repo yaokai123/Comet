@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.core.logging import get_logger
+from app.core.observability.sse_metrics import runtime_metrics
 from app.db.postgres import SessionLocal
 from app.db.redis import get_redis
 from app.models.stream_event_model import StreamEvent, StreamRun
@@ -43,12 +44,19 @@ def _route_key(run_id: str) -> str:
     return f"{_ROUTE_PREFIX}{run_id}"
 
 
-async def create_run(*, stream_type: str, stream_key: str, user_id: uuid.UUID) -> StreamRun:
+async def create_run(
+    *,
+    stream_type: str,
+    stream_key: str,
+    user_id: uuid.UUID,
+    client_request_id: uuid.UUID | None = None,
+) -> StreamRun:
     async with SessionLocal() as session:
         run = StreamRun(
             stream_type=stream_type,
             stream_key=stream_key,
             user_id=user_id,
+            client_request_id=client_request_id,
             status="running",
         )
         session.add(run)
@@ -58,17 +66,28 @@ async def create_run(*, stream_type: str, stream_key: str, user_id: uuid.UUID) -
 
 
 async def claim_run(
-    *, stream_type: str, stream_key: str, user_id: uuid.UUID
+    *,
+    stream_type: str,
+    stream_key: str,
+    user_id: uuid.UUID,
+    client_request_id: uuid.UUID | None = None,
 ) -> tuple[StreamRun, bool]:
     """Atomically claim a stream key; return the active run when another worker owns it."""
     try:
         return await create_run(
-            stream_type=stream_type, stream_key=stream_key, user_id=user_id
+            stream_type=stream_type,
+            stream_key=stream_key,
+            user_id=user_id,
+            client_request_id=client_request_id,
         ), True
     except IntegrityError:
-        active = await latest_run(
-            stream_type=stream_type, stream_key=stream_key, user_id=user_id
-        )
+        active = None
+        if client_request_id is not None:
+            active = await run_by_request(user_id=user_id, client_request_id=client_request_id)
+        if active is None:
+            active = await latest_run(
+                stream_type=stream_type, stream_key=stream_key, user_id=user_id
+            )
         if active is None:
             raise
         cutoff = datetime.now(timezone.utc) - timedelta(
@@ -82,9 +101,35 @@ async def claim_run(
                 error="stale stream run recovered",
             )
             return await create_run(
-                stream_type=stream_type, stream_key=stream_key, user_id=user_id
+                stream_type=stream_type,
+                stream_key=stream_key,
+                user_id=user_id,
+                client_request_id=client_request_id,
             ), True
         return active, False
+
+
+async def run_by_request(
+    *, user_id: uuid.UUID, client_request_id: uuid.UUID
+) -> StreamRun | None:
+    async with SessionLocal() as session:
+        return await session.scalar(
+            select(StreamRun).where(
+                StreamRun.user_id == user_id,
+                StreamRun.client_request_id == client_request_id,
+            )
+        )
+
+
+async def bind_stream_key(run_id: uuid.UUID | str, stream_key: str) -> None:
+    """Bind a newly-created request run to its conversation before meta is emitted."""
+    async with SessionLocal() as session:
+        await session.execute(
+            update(StreamRun)
+            .where(StreamRun.id == uuid.UUID(str(run_id)))
+            .values(stream_key=stream_key, updated_at=datetime.now(timezone.utc))
+        )
+        await session.commit()
 
 
 async def latest_run(
@@ -117,6 +162,7 @@ async def append_event(run_id: uuid.UUID | str, event: str, data: dict) -> Event
         await session.refresh(row)
         envelope = EventEnvelope(row.id, str(run_uuid), event, data)
     await _notify(envelope)
+    runtime_metrics.inc("stream_events_total")
     return envelope
 
 
@@ -155,6 +201,8 @@ async def finish_run(
         await session.refresh(row)
         envelope = EventEnvelope(row.id, str(run_uuid), event, data)
     await _notify(envelope)
+    runtime_metrics.inc("stream_events_total")
+    runtime_metrics.inc(f"stream_runs_{run.status}_total")
     return envelope
 
 
@@ -219,6 +267,7 @@ async def _notify(envelope: EventEnvelope) -> None:
                     },
                 )
         except Exception as exc:
+            runtime_metrics.inc("sse_forward_failure_total")
             logger.warning("Direct SSE forwarding failed; DB polling will recover: %s", exc)
 
 
@@ -309,6 +358,7 @@ async def iter_events(
                 )
             except TimeoutError:
                 # Heartbeat and fallback polling. None becomes an SSE comment.
+                runtime_metrics.inc("sse_db_poll_fallback_total")
                 yield None
     finally:
         should_unregister = False

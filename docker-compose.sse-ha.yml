@@ -24,6 +24,8 @@ services:
       POSTGRES_PASSWORD: comet
       POSTGRES_DB: comet
       REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
       STREAM_FORWARD_SECRET: sse-ha-test-secret
       STREAM_ROUTE_TTL_SECONDS: 15
       STREAM_POLL_INTERVAL_SECONDS: 0.25

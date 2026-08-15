@@ -15,6 +15,7 @@
 - **双输出**：① 数值报告（Markdown 指标表）② 明细（JSON：每题召回了啥/命中没、每段抽了啥 vs gold），看明细可定位问题、调系统策略。
 - **RAGAS 端到端评测**：对检索上下文和最终回答测 Context Precision、Context Recall、Faithfulness、Answer Relevancy 与 Factual Correctness；同时保留确定性检索指标，避免完全依赖 LLM-as-a-Judge。
 - **可审计清单**：每次 RAGAS 运行记录数据集 SHA-256、Git SHA、RAGAS 版本、生成/裁判/向量模型、逐题上下文与异常；默认关闭 RAGAS 遥测。
+- **企业 PDF 专项**：`enterprise_rag` scorecard 将正文、表格、图片和跨页表格分组统计 Recall/MRR/nDCG 与引用正确性，避免总体均值掩盖结构化内容退化。
 
 ---
 

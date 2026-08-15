@@ -27,6 +27,7 @@ from app.core.llm.chat_model import (
     supports_function_call,
 )
 from app.core.logging import get_logger
+from app.core.observability.sse_metrics import runtime_metrics
 from app.core.storage import get_storage
 from app.db.postgres import SessionLocal
 from app.db.redis import get_redis
@@ -52,8 +53,19 @@ MAX_HISTORY_TURNS = 20
 
 # 后台生成任务引用集合（防止 create_task 的任务被 GC 提前回收）
 _BG_TASKS: set = set()
-# 持久化 token 先聚合成小文本块，兼顾流式延迟与 PostgreSQL 写放大。
-_DURABLE_TOKEN_CHARS = 48
+# 持久化 token 按字符数或时间窗口批量刷新，兼顾首字延迟与 PostgreSQL 写放大。
+_VISUAL_REFERENCE_RE = re.compile(
+    r"(这|那|上|前|刚才|之前).{0,4}(张|幅|个)?(图|图片|截图|照片|表格|图表)|"
+    r"(图|图片|截图|照片|表格|图表)(中|里|上|内)|"
+    r"(它|这个|其中).{0,8}(显示|说明|写|是什么|有什|细节)|"
+    r"(再|更).{0,4}(详细|仔细|放大)|"
+    r"\b(image|screenshot|figure|photo|chart|table)\b",
+    re.IGNORECASE,
+)
+
+
+def _requires_history_vision(query: str, history_has_images: bool) -> bool:
+    return history_has_images and bool(_VISUAL_REFERENCE_RE.search(query.strip()))
 
 
 # ── 主动召回优化：用户级温热缓存（始终注入 + 后台刷新）──────────────
@@ -178,7 +190,11 @@ class ChatService:
         return await self.conv_repo.create(Conversation(user_id=user_id, title=title, project_id=body.project_id))
 
     async def _history_messages(
-        self, conv_id: uuid.UUID, user_id: uuid.UUID
+        self,
+        conv_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        visual_query: str | None = None,
     ) -> tuple[list, bool]:
         """历史消息转 LangChain 消息（不含 system 与当前问题）。
 
@@ -197,7 +213,12 @@ class ChatService:
             if m.role == ROLE_USER
         )
         image_parts_by_message: dict[uuid.UUID, list[dict]] = {}
-        if history_has_images:
+        include_history_images = (
+            history_has_images
+            if visual_query is None
+            else _requires_history_vision(visual_query, history_has_images)
+        )
+        if include_history_images:
             remaining_bytes = settings.vision_history_image_budget_bytes
             remaining_count = settings.vision_history_image_max_count
             # 优先保留最近的历史图片，再恢复为原消息顺序。
@@ -231,7 +252,7 @@ class ChatService:
                 )
             elif m.role == ROLE_ASSISTANT:
                 out.append(AIMessage(content=m.content))
-        return out, history_has_images
+        return out, include_history_images
 
     async def _load_vision_image_parts(
         self,
@@ -461,7 +482,28 @@ class ChatService:
             for a in body.attachments
             if a.text
         ]
+        initial_stream_key = (
+            str(body.conversation_id)
+            if body.conversation_id
+            else f"request:{body.client_request_id}"
+        )
         try:
+            run, claimed = await durable_stream.claim_run(
+                stream_type="chat",
+                stream_key=initial_stream_key,
+                user_id=user_id,
+                client_request_id=body.client_request_id,
+            )
+            if not claimed:
+                # 同一 request_id 的网络重试必须回放原 Run，不能重复写消息或调用模型。
+                if run.client_request_id != body.client_request_id:
+                    yield _sse("error", {"message": "该会话已有生成任务，请稍后再试"})
+                    return
+                runtime_metrics.inc("duplicate_request_total")
+                async for chunk in self._relay_durable(run.id):
+                    yield chunk
+                return
+
             if body.image_keys:
                 from app.core.rag.chat_images import validate_chat_image_keys
 
@@ -489,34 +531,48 @@ class ChatService:
                             meta_data=self._user_meta(attachments, body.image_keys),
                         )
                     )
-        except Exception as exc:
-            yield _sse("error", {"message": str(exc)})
-            return
+                    if body.image_keys:
+                        from app.core.rag.chat_images import mark_chat_images_attached
 
-        try:
-            run, claimed = await durable_stream.claim_run(
-                stream_type="chat", stream_key=cid, user_id=user_id
+                        await mark_chat_images_attached(
+                            session, user_id, body.image_keys
+                        )
+                if initial_stream_key != cid:
+                    await durable_stream.bind_stream_key(run.id, cid)
+            await durable_stream.append_event(
+                run.id,
+                "meta",
+                {
+                    "conversation_id": cid,
+                    "title": title,
+                    "run_id": str(run.id),
+                    "client_request_id": str(body.client_request_id),
+                },
             )
-            if claimed:
-                await durable_stream.append_event(
+            task = asyncio.create_task(
+                self._run_chat_turn_durable(
+                    user_id,
+                    uuid.UUID(cid),
+                    body,
+                    attachments,
+                    skip_user_message,
                     run.id,
-                    "meta",
-                    {"conversation_id": cid, "title": title, "run_id": str(run.id)},
                 )
-                task = asyncio.create_task(
-                    self._run_chat_turn_durable(
-                        user_id,
-                        uuid.UUID(cid),
-                        body,
-                        attachments,
-                        skip_user_message,
-                        run.id,
-                    )
-                )
-                _BG_TASKS.add(task)
-                task.add_done_callback(_BG_TASKS.discard)
+            )
+            _BG_TASKS.add(task)
+            task.add_done_callback(_BG_TASKS.discard)
         except Exception as exc:
-            yield _sse("error", {"message": f"创建对话流失败：{exc}"})
+            if "run" in locals() and claimed:
+                try:
+                    await durable_stream.finish_run(
+                        run.id,
+                        event="error",
+                        data={"message": str(exc)},
+                        error=str(exc),
+                    )
+                except Exception:
+                    logger.exception("请求初始化失败且无法终止 stream run")
+            yield _sse("error", {"message": str(exc)})
             return
         async for chunk in self._relay_durable(run.id):
             yield chunk
@@ -539,7 +595,63 @@ class ChatService:
         if after_event_id > 0:
             snapshot = await durable_stream.resume_snapshot(run.id, after_event_id)
             yield _sse("resume", snapshot)
+        started = asyncio.get_running_loop().time()
+        first = True
         async for chunk in self._relay_durable(run.id, after_event_id):
+            if first:
+                runtime_metrics.observe(
+                    "sse_resume_latency_ms",
+                    (asyncio.get_running_loop().time() - started) * 1000,
+                )
+                runtime_metrics.inc("sse_reconnect_total")
+                first = False
+            yield chunk
+
+    async def resume_request_events(
+        self,
+        user_id: uuid.UUID,
+        client_request_id: uuid.UUID,
+        after_event_id: int = 0,
+    ) -> AsyncGenerator[str, None]:
+        """会话 ID 尚未知时，按请求幂等键恢复原 Run。"""
+        run = None
+        # POST 响应刚断开时，恢复 GET 可能比创建 Run 的事务早几十毫秒到达。
+        for _ in range(20):
+            run = await durable_stream.run_by_request(
+                user_id=user_id, client_request_id=client_request_id
+            )
+            if run is not None:
+                break
+            await asyncio.sleep(0.1)
+        if run is None:
+            yield _sse("error", {"message": "请求不存在或已过期"})
+            return
+        if run.status != "running" and run.final_message_id:
+            async with SessionLocal() as session:
+                final_message = await session.get(Message, run.final_message_id)
+            if final_message is not None:
+                metadata = final_message.meta_data or {}
+                yield _sse(
+                    "resume",
+                    {
+                        "content": final_message.content,
+                        "citations": metadata.get("citations") or [],
+                        "tool_calls": metadata.get("tool_calls") or [],
+                    },
+                )
+        if after_event_id > 0:
+            snapshot = await durable_stream.resume_snapshot(run.id, after_event_id)
+            yield _sse("resume", snapshot)
+        started = asyncio.get_running_loop().time()
+        first = True
+        async for chunk in self._relay_durable(run.id, after_event_id):
+            if first:
+                runtime_metrics.observe(
+                    "sse_resume_latency_ms",
+                    (asyncio.get_running_loop().time() - started) * 1000,
+                )
+                runtime_metrics.inc("sse_reconnect_total")
+                first = False
             yield chunk
 
     async def _relay_durable(
@@ -565,14 +677,17 @@ class ChatService:
         pending_tokens = ""
         tool_calls: list[dict] = []
         citations: list[dict] = []
+        route_reason = "text_only"
+        last_token_flush = asyncio.get_running_loop().time()
 
         async def flush_tokens() -> None:
-            nonlocal pending_tokens
+            nonlocal pending_tokens, last_token_flush
             if pending_tokens:
                 await durable_stream.append_event(
                     run_id, "token", {"text": pending_tokens}
                 )
                 pending_tokens = ""
+                last_token_flush = asyncio.get_running_loop().time()
 
         try:
             tracer = get_tracer()
@@ -604,8 +719,20 @@ class ChatService:
                             text = ev["text"]
                             full_text += text
                             pending_tokens += text
-                            if len(pending_tokens) >= _DURABLE_TOKEN_CHARS:
+                            elapsed_ms = (
+                                asyncio.get_running_loop().time() - last_token_flush
+                            ) * 1000
+                            if (
+                                len(pending_tokens) >= settings.stream_token_flush_chars
+                                or elapsed_ms >= settings.stream_token_flush_ms
+                            ):
                                 await flush_tokens()
+                        elif etype == "route":
+                            route_reason = str(ev.get("reason") or "text_only")
+                            runtime_metrics.inc(f"vision_route_{route_reason}_total")
+                            await durable_stream.append_event(
+                                run_id, "route", {"reason": route_reason}
+                            )
                         elif etype in {"tool_call", "tool_start"}:
                             await flush_tokens()
                             tool_calls.append(
@@ -663,6 +790,7 @@ class ChatService:
                                 "citations": citations,
                                 "tool_calls": tool_calls,
                                 "trace_id": str(tctx.trace_id),
+                                "route_reason": route_reason,
                             },
                         )
                     )
@@ -746,10 +874,14 @@ class ChatService:
                 sp = (sp + "\n\n" + render_agent_prompt("human_style.jinja2")).strip()
             return sp
 
-        history, history_has_images = await self._history_messages(conv.id, user_id)
+        history, history_vision_used = await self._history_messages(
+            conv.id, user_id, visual_query=composed_text
+        )
 
-        if body.image_keys or history_has_images:
-            # 当前轮或历史窗口含图片时强制走视觉模型；历史图片按消息聚合并受总预算约束。
+        if body.image_keys or history_vision_used:
+            reason = "current_upload" if body.image_keys else "history_reference"
+            yield {"type": "route", "reason": reason}
+            # 当前轮图片必走视觉；历史图片只在问题明确指代视觉内容时按消息聚合回放。
             system_prompt = await _assemble_prompt(has_tools=False)
             async for token in self._stream_multimodal(
                 user_id, system_prompt, history, composed_text, body.image_keys
@@ -760,6 +892,7 @@ class ChatService:
             return
 
         # 非多模态：构建工具（内置 + 带 TTL 缓存的 MCP 工具清单）并跑编排。
+        yield {"type": "route", "reason": "text_only"}
         model, config = await build_default_chat_model(
             self.session, user_id, temperature=temperature, streaming=True
         )

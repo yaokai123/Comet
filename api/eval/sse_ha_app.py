@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
@@ -12,10 +13,14 @@ from pydantic import BaseModel
 from sqlalchemy.dialects.postgresql import insert
 
 from app.controllers.internal_stream_controller import router as internal_stream_router
+from app.controllers.chat_controller import router as chat_router
+from app.core.dependencies import get_current_project_id, get_current_user
+from app.core.exceptions import register_exception_handlers
 from app.core.realtime import durable_stream
 from app.db import postgres, redis
 from app.db.postgres import SessionLocal
 from app.models.user_model import User
+from app.services.chat_service import ChatService
 
 PROBE_USER_ID = uuid.UUID("00000000-0000-4000-8000-000000000042")
 INSTANCE_ID = os.getenv("STREAM_INSTANCE_ID", "unknown")
@@ -43,6 +48,34 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(internal_stream_router, prefix="/api")
+app.include_router(chat_router, prefix="/api")
+register_exception_handlers(app)
+
+
+async def _probe_user():
+    async with SessionLocal() as session:
+        return await session.get(User, PROBE_USER_ID)
+
+
+async def _no_project():
+    return None
+
+
+app.dependency_overrides[get_current_user] = _probe_user
+app.dependency_overrides[get_current_project_id] = _no_project
+
+
+async def _deterministic_generate_events(
+    _self, _user_id, _conv, body, _attachments, _citations
+):
+    """Exercise the real ChatService persistence path without external model cost."""
+    answer = f"ECHO:{body.message}"
+    for offset in range(0, len(answer), 4):
+        await asyncio.sleep(0.08)
+        yield {"type": "token", "text": answer[offset : offset + 4]}
+
+
+ChatService._generate_events = _deterministic_generate_events
 
 
 class ProbeEvent(BaseModel):

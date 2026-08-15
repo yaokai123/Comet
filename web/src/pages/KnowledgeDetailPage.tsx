@@ -203,7 +203,6 @@ function DocTab({ kbId }: { kbId: string }) {
       const error = (e as Error).message
       updateQueue(queueId, { status: 'failed', error })
       message.error(error)
-    } finally {
     }
     return false
   }

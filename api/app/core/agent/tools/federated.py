@@ -136,13 +136,12 @@ async def build_federated_tool(
                 try:
                     import uuid
 
-                    from app.core.storage import get_storage
                     from app.repositories.image_repository import ImageRepository
 
                     image_id = uuid.UUID(str(metadata.get("source_id")))
                     image = await ImageRepository(session).get(user_id, image_id)
                     if image is not None:
-                        image_url = get_storage().get_url(image.file_key)
+                        image_url = f"/api/images/{image.id}/content"
                         thumbnail_url = f"/api/images/{image.id}/thumbnail"
                 except (TypeError, ValueError):
                     pass

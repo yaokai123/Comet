@@ -59,3 +59,25 @@ cd D:\Comet-main\api
 ```powershell
 powershell -ExecutionPolicy Bypass -File D:\Comet-main\scripts\test-sse-ha.ps1
 ```
+
+## Phase 4：请求幂等、视觉成本与生产验收
+
+- 每次发送携带 `client_request_id`；`stream_runs(user_id, client_request_id)` 唯一，网络重试只回放原 Run，不重复写消息或调用模型。
+- 首次 POST 在会话 `meta` 前断开时，通过 `/api/chat/runs/by-request/{id}/events` 找回原生成。
+- 已完成 Run 一小时后压缩 token/tool/trace 事件，最终回答从 `messages` 快照恢复；Run 仍按 24 小时保留。
+- 图片执行真实格式、单帧、最大边、最大像素、日数量/字节配额校验，并重新编码移除 EXIF；未附加图片 24 小时后清理。
+- 图片引用使用稳定的 `/api/images/{id}/content` 和 `/thumbnail` 鉴权接口，缩略图预生成并缓存到对象存储。
+- 历史图片仅在问题明确指代图片、截图、图表或表格时重新发送视觉模型；普通追问不重复支付多模态成本。
+- `/api/health/runtime-metrics` 提供续传、转发失败、DB 轮询、重复请求、视觉路由、图片拒绝及三级检索质量信号。
+- HA 脚本同时运行协议探针和真实 `ChatService + Playwright` 浏览器离线恢复测试，断言消息与终态恰好一次。
+
+企业 PDF 回归评分：
+
+```powershell
+cd D:\Comet-main\api
+.\.venv\Scripts\python.exe -m eval.benchmarks.enterprise_rag.runner `
+  --predictions eval/results/enterprise_rag/predictions.jsonl `
+  --output eval/results/enterprise_rag/scorecard.json
+```
+
+预测文件每行包含 `query_id`、`retrieved_source_ids`、`cited_source_ids`。报告按正文、表格、图片和跨页表格分别输出 Recall@5、MRR@5、nDCG@5 与引用 Precision/Recall。

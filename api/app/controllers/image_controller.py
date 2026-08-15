@@ -31,18 +31,25 @@ async def upload_image(
     from pathlib import Path
 
     from app.config import settings
-    from app.core.rag.chat_images import validate_chat_image_upload
+    from app.core.rag.chat_images import reserve_chat_image_quota, validate_chat_image_upload
 
     content = await file.read(settings.chat_image_max_bytes + 1)
-    ext = validate_chat_image_upload(
-        filename=file.filename or "image",
-        content_type=file.content_type,
-        content=content,
-    )
+    try:
+        validated = validate_chat_image_upload(
+            filename=file.filename or "image",
+            content_type=file.content_type,
+            content=content,
+        )
+    except Exception:
+        from app.core.observability.sse_metrics import runtime_metrics
+
+        runtime_metrics.inc("image_validation_rejected_total")
+        raise
+    await reserve_chat_image_quota(user.id, len(validated.content))
     original = Path(file.filename or "image")
-    normalized_name = f"{original.stem or 'image'}{ext}"
+    normalized_name = f"{original.stem or 'image'}{validated.extension}"
     service = ImageService(session)
-    img = await service.upload(user.id, normalized_name, content, kb_id)
+    img = await service.upload(user.id, normalized_name, validated.content, kb_id)
     return success(await service.to_out_dict(img), "上传成功，正在处理")
 
 
@@ -106,6 +113,20 @@ async def get_image_thumbnail(
     return Response(
         content=content,
         media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@router.get("/{image_id}/content")
+async def get_image_content(
+    image_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    content, media_type = await ImageService(session).content(user.id, image_id)
+    return Response(
+        content=content,
+        media_type=media_type,
         headers={"Cache-Control": "private, max-age=3600"},
     )
 
