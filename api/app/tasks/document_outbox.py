@@ -9,11 +9,33 @@ from app.celery_app import celery_app
 from app.config import settings
 from app.core.logging import get_logger
 from app.db.postgres import create_task_engine
+from app.models.document_model import DOC_STATUS_DONE, Document
 from app.models.document_index_job_model import DocumentIndexJob
 from app.tasks.parse import parse_document_task
 
 MAX_ATTEMPTS = 3
 logger = get_logger(__name__)
+
+
+def _recoverable_jobs_statement(stale_before: datetime):
+    return (
+        select(DocumentIndexJob)
+        .join(Document, Document.id == DocumentIndexJob.document_id)
+        .where(
+            DocumentIndexJob.generation == Document.generation,
+            Document.status != DOC_STATUS_DONE,
+            DocumentIndexJob.attempts < MAX_ATTEMPTS,
+            or_(
+                DocumentIndexJob.status.in_(("pending", "failed")),
+                and_(
+                    DocumentIndexJob.status.in_(("queued", "running")),
+                    DocumentIndexJob.updated_at < stale_before,
+                ),
+            ),
+        )
+        .with_for_update(skip_locked=True)
+        .limit(100)
+    )
 
 
 async def _reconcile() -> int:
@@ -24,18 +46,9 @@ async def _reconcile() -> int:
             stale_before = datetime.now(timezone.utc) - timedelta(
                 seconds=settings.document_index_job_stale_seconds
             )
-            jobs = (await session.execute(
-                select(DocumentIndexJob).where(
-                    DocumentIndexJob.attempts < MAX_ATTEMPTS,
-                    or_(
-                        DocumentIndexJob.status.in_(("pending", "failed")),
-                        and_(
-                            DocumentIndexJob.status.in_(("queued", "running")),
-                            DocumentIndexJob.updated_at < stale_before,
-                        ),
-                    ),
-                ).with_for_update(skip_locked=True).limit(100)
-            )).scalars().all()
+            jobs = (
+                await session.execute(_recoverable_jobs_statement(stale_before))
+            ).scalars().all()
             for job in jobs:
                 if job.status in {"queued", "running"}:
                     logger.warning(

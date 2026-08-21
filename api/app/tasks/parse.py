@@ -54,6 +54,14 @@ from app.repositories.tag_repository import TagRepository
 logger = get_logger(__name__)
 
 
+def _mineru_success_metadata(metadata: dict | None, generation: int) -> dict:
+    updated = dict(metadata or {})
+    updated["generation"] = generation
+    updated["mineru_fallback"] = False
+    updated.pop("mineru_error", None)
+    return updated
+
+
 async def _run(document_id: str, generation: int | None = None, job_id: str | None = None) -> None:
     doc_uuid = uuid.UUID(document_id)
     engine = create_task_engine()
@@ -169,6 +177,9 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
                 )
                 document_version.parser_name = "mineru"
                 document_version.parser_version = parser_version
+                document_version.metadata_json = _mineru_success_metadata(
+                    document_version.metadata_json, doc.generation
+                )
                 text = "\n\n".join(block.content for block in document_ir.ordered_blocks())
             except Exception as exc:
                 if not settings.mineru_fallback_enabled:

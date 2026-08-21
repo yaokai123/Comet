@@ -7,10 +7,26 @@ from uuid import uuid4
 from sqlalchemy.exc import PendingRollbackError
 
 from app.models.document_model import DOC_STATUS_FAILED
-from app.tasks.parse import _parse_locked
+from app.tasks.parse import _mineru_success_metadata, _parse_locked
 
 
 class ParseTaskResilienceTests(unittest.TestCase):
+    def test_mineru_success_clears_stale_fallback_audit_metadata(self):
+        metadata = _mineru_success_metadata(
+            {
+                "generation": 1,
+                "mineru_fallback": True,
+                "mineru_error": "transient 502",
+                "preserved": "value",
+            },
+            3,
+        )
+
+        self.assertEqual(metadata["generation"], 3)
+        self.assertIs(metadata["mineru_fallback"], False)
+        self.assertNotIn("mineru_error", metadata)
+        self.assertEqual(metadata["preserved"], "value")
+
     def test_parse_locked_rolls_back_before_persisting_failure_status(self):
         document_id = str(uuid4())
         doc_id = uuid4()

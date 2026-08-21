@@ -150,11 +150,11 @@ services:
       CONNECTOR_LOCAL_ROOTS: /connector-data
       MINERU_ENDPOINT: ${MINERU_ENDPOINT:-http://host.docker.internal:18080/parse}
       MINERU_TIMEOUT_SECONDS: ${MINERU_TIMEOUT_SECONDS:-1800}
-      # The local BGE-M3 endpoint supports larger batches than the conservative
-      # cloud-provider default. One batch per parse process avoids GPU overload;
-      # prefork still runs separate documents in parallel.
-      EMBED_BATCH_SIZE: "80"
-      EMBED_CONCURRENCY: "1"
+      # Keep each local BGE-M3 request below the 60-second client timeout. Four
+      # small in-flight batches preserve throughput without creating a backlog
+      # of abandoned 80-item requests after timeouts.
+      EMBED_BATCH_SIZE: "10"
+      EMBED_CONCURRENCY: "4"
     volumes:
       - ./api/storage:/app/storage
       - ${CONNECTOR_LOCAL_PATH:-./connector-data}:/connector-data:ro
