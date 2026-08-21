@@ -663,7 +663,7 @@ const [params, setParams] = useSearchParams()
   }
 
   // 拖拽到对话区上传：图片走多模态，文档走临时附件，按扩展名/类型分流
-  const DOC_EXTS = ['.pdf', '.docx', '.md', '.markdown', '.txt', '.html', '.htm']
+  const DOC_EXTS = ['.pdf', '.docx', '.xlsx', '.xlsm', '.xls', '.md', '.markdown', '.txt', '.html', '.htm']
   const handleDroppedFiles = async (files: FileList) => {
     for (const file of Array.from(files)) {
       const isImage = file.type.startsWith('image/')
@@ -1254,7 +1254,7 @@ const [params, setParams] = useSearchParams()
                           </Button>
                         </Upload>
                         <Upload
-                          accept=".pdf,.docx,.md,.markdown,.txt,.html,.htm"
+                          accept=".pdf,.docx,.xlsx,.xlsm,.xls,.md,.markdown,.txt,.html,.htm"
                           showUploadList={false}
                           beforeUpload={onUploadFile as never}
                         >
@@ -1342,7 +1342,7 @@ const [params, setParams] = useSearchParams()
                         </Tooltip>
                       </Upload>
                       <Upload
-                        accept=".pdf,.docx,.md,.markdown,.txt,.html,.htm"
+                        accept=".pdf,.docx,.xlsx,.xlsm,.xls,.md,.markdown,.txt,.html,.htm"
                         showUploadList={false}
                         beforeUpload={onUploadFile as never}
                       >

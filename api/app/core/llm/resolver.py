@@ -2,10 +2,12 @@
 import json
 import uuid
 
+from cryptography.fernet import InvalidToken
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BizError
-from app.core.llm.client import LLMClient
+from app.core.llm.client import LLMClient, _is_local_url
+from app.core.logging import get_logger
 from app.core.security import decrypt_secret
 from app.repositories.model_config_repository import ModelConfigRepository
 
@@ -16,12 +18,27 @@ _TYPE_LABEL = {
     "rerank": "Rerank",
 }
 
+logger = get_logger(__name__)
+
 
 def _extra_headers(config) -> dict[str, str]:
     if not config.extra_headers_encrypted:
         return {}
     value = json.loads(decrypt_secret(config.extra_headers_encrypted))
     return {str(k): str(v) for k, v in value.items()}
+
+
+def _api_key(config) -> str:
+    if config.api_key_encrypted:
+        try:
+            return decrypt_secret(config.api_key_encrypted)
+        except Exception:
+            if _is_local_url(config.base_url):
+                return "local"
+            raise
+    if _is_local_url(config.base_url):
+        return "local"
+    raise ValueError("non-local model configuration requires an encrypted API key")
 
 
 async def get_client_for_type(
@@ -36,7 +53,7 @@ async def get_client_for_type(
     config = next((c for c in configs if c.is_default), configs[0])
     return LLMClient(
         base_url=config.base_url,
-        api_key=decrypt_secret(config.api_key_encrypted),
+        api_key=_api_key(config),
         model_name=config.model_name,
         wire_api=config.wire_api or "chat_completions",
         default_headers=_extra_headers(config),
@@ -53,9 +70,17 @@ async def get_optional_client_for_type(
     if not configs:
         return None
     config = next((c for c in configs if c.is_default), configs[0])
+    try:
+        api_key = _api_key(config)
+    except InvalidToken:
+        logger.warning("optional %s model config secret could not be decrypted; ignoring config", type_)
+        return None
+    except ValueError:
+        logger.warning("optional %s model config is incomplete; ignoring config", type_)
+        return None
     return LLMClient(
         base_url=config.base_url,
-        api_key=decrypt_secret(config.api_key_encrypted),
+        api_key=api_key,
         model_name=config.model_name,
         wire_api=config.wire_api or "chat_completions",
         default_headers=_extra_headers(config),

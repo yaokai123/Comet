@@ -8,13 +8,14 @@ import asyncio
 import hashlib
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.models  # noqa: F401  确保所有 ORM 模型注册到 metadata
 from app.celery_app import celery_app
 from app.config import settings
 from app.core.llm.resolver import get_client_for_type, get_optional_client_for_type
+from app.core.llm.client import close_llm_client
 from app.core.logging import get_logger
 from app.core.task_lock import redis_task_lock
 from app.core.knowledge.adaptive_chunker import AdaptiveChunker, infer_plain_text_ir
@@ -23,9 +24,12 @@ from app.core.knowledge.mineru_adapter import (
     content_list_to_ir,
     document_ir_json,
 )
+from app.core.knowledge.pymupdf_adapter import pdf_to_ir
+from app.core.knowledge.excel_adapter import excel_to_ir
+from app.core.knowledge.query_planner import extract_model_tokens
 from app.core.rag.chunker import chunk_parent_child
 from app.core.rag.classifier import classify_content
-from app.core.rag.es_index import CHUNK_TYPE_CHILD, CHUNK_TYPE_PARENT
+from app.core.rag.es_index import CHUNK_TYPE_CHILD
 from app.core.rag.es_store import (
     build_chunk_doc,
     bulk_index,
@@ -43,6 +47,7 @@ from app.models.document_model import (
 )
 from app.models.document_index_job_model import DocumentIndexJob
 from app.models.enterprise_knowledge_model import DocumentVersion
+from app.models.enterprise_rbac_model import KnowledgeRoot
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.tag_repository import TagRepository
 
@@ -58,7 +63,10 @@ async def _run(document_id: str, generation: int | None = None, job_id: str | No
             await _parse(session, document_id, doc_uuid, generation, job_id)
     finally:
         await engine.dispose()
-        # 关闭本任务事件循环内创建的 ES 客户端
+        # Close every async singleton created in this task's event loop. Celery
+        # reuses the prefork process for later asyncio.run() calls; carrying an
+        # HTTP/ES/Redis client across those loops causes "Event loop is closed".
+        await close_llm_client()
         await elastic.close()
         await redis.close()
 
@@ -76,7 +84,11 @@ async def _parse(session: AsyncSession, document_id: str, doc_uuid: uuid.UUID, g
     if doc.status == DOC_STATUS_DONE:
         logger.info("文档已完成，跳过重复解析: %s", document_id)
         return
-    async with redis_task_lock(f"task-lock:document-parse:{document_id}") as acquired:
+    # Keep a short renewable lease. A live worker continuously extends it;
+    # after a process crash it expires soon enough for outbox stale recovery.
+    async with redis_task_lock(
+        f"task-lock:document-parse:{document_id}", ttl_seconds=600
+    ) as acquired:
         if acquired:
             await _parse_locked(session, document_id, doc, generation, job_id)
 
@@ -85,6 +97,9 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
     repo = DocumentRepository(session)
     job = None
     document_version = None
+    doc_id = doc.id
+    doc_user_id = doc.user_id
+    document_version_id = None
 
     try:
         if generation is not None and doc.generation != generation:
@@ -122,11 +137,24 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
             )
             session.add(document_version)
             await session.flush()
+            document_version_id = document_version.id
         else:
             document_version.status = "parsing"
+            document_version_id = document_version.id
         # 2. Parse into canonical IR. Configured PDFs use MinerU; all other
         # formats keep the compatibility parser as a safe fallback.
         document_ir = None
+        if doc.file_ext.lower() in {".xlsx", ".xlsm", ".xls"}:
+            document_ir = excel_to_ir(
+                content,
+                file_ext=doc.file_ext,
+                document_id=document_id,
+                version_id=str(document_version.id),
+                title=doc.file_name,
+            )
+            document_version.parser_name = "excel"
+            document_version.parser_version = "1"
+            text = "\n\n".join(block.content for block in document_ir.ordered_blocks())
         if doc.file_ext.lower() == ".pdf" and settings.mineru_endpoint:
             try:
                 content_list, parser_version = await MinerUClient(
@@ -151,6 +179,16 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
                     "mineru_fallback": True,
                     "mineru_error": str(exc)[:500],
                 }
+        if document_ir is None and doc.file_ext.lower() == ".pdf":
+            document_ir = pdf_to_ir(
+                content,
+                document_id=document_id,
+                version_id=str(document_version.id),
+                title=doc.file_name,
+            )
+            document_version.parser_name = "pymupdf_layout"
+            document_version.parser_version = document_ir.metadata.get("parser_version")
+            text = "\n\n".join(block.content for block in document_ir.ordered_blocks())
         if document_ir is None:
             text = parse_document(doc.file_ext, content)
             if not text.strip():
@@ -170,22 +208,24 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
         )
         await get_storage().save(ir_key, document_ir_json(document_ir))
         document_version.ir_key = ir_key
-        doc.progress = 0.3
-        await repo.save(doc)
+        await session.commit()
 
         # 3. Analyze structure and select a chunking strategy.
         adaptive_chunks, chunk_decision = AdaptiveChunker().chunk(document_ir)
         if not adaptive_chunks:
             raise ValueError("分块结果为空")
 
-        # 4. 子块向量化（用用户默认 embedding 模型）
+        # 4. Root+Leaf: Root is durable PostgreSQL context; only Leaf is indexed.
         embed_client = await get_client_for_type(session, doc.user_id, "embedding")
         user_id = str(doc.user_id)
         kb_id = str(doc.kb_id) if doc.kb_id else None
         es_docs: list[dict] = []
         chunk_total = 0
+        leaf_records: list[tuple[str, KnowledgeRoot, dict]] = []
+        await session.execute(delete(KnowledgeRoot).where(
+            KnowledgeRoot.document_version_id == document_version.id
+        ))
         for adaptive in adaptive_chunks:
-            parents = chunk_parent_child(adaptive.retrieval_text)
             metadata = {
                 "retrieval_text": adaptive.retrieval_text,
                 "document_version_id": str(document_version.id),
@@ -199,42 +239,53 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
                 "logical_table_ids": adaptive.metadata.get("logical_table_ids", []),
                 "artifact_paths": adaptive.metadata.get("artifact_paths", []),
                 "block_anchors": adaptive.metadata.get("block_anchors", []),
+                "chunk_role": adaptive.metadata.get("chunk_role"),
+                "neighbor_context_pages": adaptive.metadata.get("neighbor_context_pages", []),
+                "model_tokens": extract_model_tokens(adaptive.retrieval_text),
+                "chunk_schema": "root_leaf_v1",
             }
-            for parent in parents:
-                parent_doc = build_chunk_doc(
-                    user_id=user_id,
-                    source_type="document",
-                    source_id=document_id,
-                    doc_name=doc.file_name,
-                    chunk_type=CHUNK_TYPE_PARENT,
-                    content=parent.content,
-                    vector=None,
-                    kb_id=kb_id,
-                    **metadata,
-                )
-                parent_chunk_id = parent_doc["_id"]
-                es_docs.append(parent_doc)
+            root = KnowledgeRoot(
+                document_id=doc.id,
+                document_version_id=document_version.id,
+                root_key=adaptive.chunk_id,
+                title=(adaptive.section_path[-1] if adaptive.section_path else doc.file_name),
+                content=adaptive.content,
+                section_path=list(adaptive.section_path),
+                page_start=adaptive.page_start,
+                page_end=adaptive.page_end,
+                metadata_json=metadata,
+            )
+            session.add(root)
+            await session.flush()
+            leaf_texts = [
+                child
+                for parent in chunk_parent_child(adaptive.retrieval_text)
+                for child in (parent.children or [parent.content])
+                if child.strip()
+            ]
+            leaf_records.extend((child, root, metadata) for child in leaf_texts)
 
-                if parent.children:
-                    vectors = await embed_client.embed(parent.children)
-                    for child, vec in zip(parent.children, vectors):
-                        es_docs.append(
-                            build_chunk_doc(
-                                user_id=user_id,
-                                source_type="document",
-                                source_id=document_id,
-                                doc_name=doc.file_name,
-                                chunk_type=CHUNK_TYPE_CHILD,
-                                content=child,
-                                vector=vec,
-                                parent_id=parent_chunk_id,
-                                kb_id=kb_id,
-                                **metadata,
-                            )
-                        )
-                        chunk_total += 1
-        doc.progress = 0.8
-        await repo.save(doc)
+        # Embed all leaves for one document together. The client enforces the
+        # provider batch limit and bounded concurrency, avoiding one HTTP round
+        # trip per root while preserving root/leaf provenance exactly.
+        vectors = await embed_client.embed([child for child, _, _ in leaf_records])
+        for (child, root, metadata), vec in zip(leaf_records, vectors, strict=True):
+            es_docs.append(build_chunk_doc(
+                user_id=user_id,
+                source_type="document",
+                source_id=document_id,
+                doc_name=doc.file_name,
+                chunk_type=CHUNK_TYPE_CHILD,
+                content=child,
+                vector=vec,
+                root_id=str(root.id),
+                root_title=root.title,
+                parent_id=None,
+                kb_id=kb_id,
+                **metadata,
+            ))
+            chunk_total += 1
+        await session.commit()
 
         # 5. 写 ES（先清旧 chunk，支持重试幂等）
         await delete_by_source(user_id, document_id)
@@ -243,7 +294,10 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
         await bulk_index(es_docs)
 
         # 6. AI 自动分类打标签（有对话模型才做，失败不阻断）
-        await _auto_tag(session, doc, text)
+        try:
+            await _auto_tag(session, doc_user_id, doc_id, text)
+        except Exception:
+            logger.warning("文档自动打标签失败，已忽略: %s", document_id, exc_info=True)
 
         doc.status = DOC_STATUS_DONE
         doc.progress = 1.0
@@ -256,31 +310,44 @@ async def _parse_locked(session: AsyncSession, document_id: str, doc, generation
         logger.info("文档解析完成: %s chunks=%d", document_id, chunk_total)
     except Exception as e:
         logger.error("文档解析失败: %s: %s", document_id, e, exc_info=True)
+        await session.rollback()
+        repo = DocumentRepository(session)
+
+        refreshed_doc = await session.get(type(doc), doc_id)
+        if refreshed_doc is not None:
+            doc = refreshed_doc
         doc.status = DOC_STATUS_FAILED
         doc.error_msg = str(e)[:500]
+
+        if job_id:
+            job = await session.get(DocumentIndexJob, uuid.UUID(job_id))
         if job:
             job.status, job.error_msg = "failed", str(e)[:2000]
-        if document_version is not None:
-            document_version.status = "failed"
+
+        if document_version_id is not None:
+            refreshed_version = await session.get(DocumentVersion, document_version_id)
+            if refreshed_version is not None:
+                refreshed_version.status = "failed"
+
         await repo.save(doc)
 
 
-async def _auto_tag(session: AsyncSession, doc, text: str) -> None:
+async def _auto_tag(session: AsyncSession, user_id: uuid.UUID, document_id: uuid.UUID, text: str) -> None:
     """用对话模型给文档分类，写回 PG（关联）与 ES（chunk tags）。"""
-    chat_client = await get_optional_client_for_type(session, doc.user_id, "chat")
+    chat_client = await get_optional_client_for_type(session, user_id, "chat")
     if not chat_client:
         return
     tag_repo = TagRepository(session)
-    existing = [t.name for t in await tag_repo.list_by_user(doc.user_id)]
+    existing = [t.name for t in await tag_repo.list_by_user(user_id)]
     tag_names = await classify_content(chat_client, text, existing)
     if not tag_names:
         return
     tag_ids = []
     for name in tag_names:
-        tag = await tag_repo.get_or_create(doc.user_id, name)
+        tag = await tag_repo.get_or_create(user_id, name)
         tag_ids.append(tag.id)
-    await tag_repo.set_document_tags(doc.id, tag_ids)
-    await update_tags_by_source(str(doc.user_id), str(doc.id), tag_names)
+    await tag_repo.set_document_tags(document_id, tag_ids)
+    await update_tags_by_source(str(user_id), str(document_id), tag_names)
 
 
 @celery_app.task(name="app.tasks.parse.parse_document")

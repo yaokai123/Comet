@@ -1,6 +1,6 @@
 """文档解析：把各类文件的二进制内容提取为纯文本。
 
-支持 PDF / Word(docx) / Markdown / 纯文本 / HTML。
+支持 PDF / Word(docx) / Excel(xlsx/xlsm/xls) / Markdown / 纯文本 / HTML。
 """
 import io
 
@@ -8,7 +8,9 @@ import chardet
 
 from app.core.exceptions import BizError
 
-SUPPORTED_EXTS = {".pdf", ".docx", ".md", ".markdown", ".txt", ".html", ".htm"}
+SUPPORTED_EXTS = {
+    ".pdf", ".docx", ".xlsx", ".xlsm", ".xls", ".md", ".markdown", ".txt", ".html", ".htm"
+}
 
 
 def _decode_text(content: bytes) -> str:
@@ -42,6 +44,20 @@ def _parse_docx(content: bytes) -> str:
     return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
 
 
+def _parse_excel(content: bytes, ext: str) -> str:
+    """Compatibility preview for Excel; indexing uses the structured IR adapter."""
+    from app.core.knowledge.excel_adapter import excel_to_ir
+
+    ir = excel_to_ir(
+        content,
+        file_ext=ext,
+        document_id="preview",
+        version_id="preview",
+        title="workbook",
+    )
+    return "\n\n".join(block.content for block in ir.ordered_blocks() if block.content.strip())
+
+
 def _parse_markdown(content: bytes) -> str:
     import markdown
     from bs4 import BeautifulSoup
@@ -69,6 +85,8 @@ def parse_document(file_ext: str, content: bytes) -> str:
         return _parse_pdf(content)
     if ext == ".docx":
         return _parse_docx(content)
+    if ext in (".xlsx", ".xlsm", ".xls"):
+        return _parse_excel(content, ext)
     if ext in (".md", ".markdown"):
         return _parse_markdown(content)
     if ext in (".html", ".htm"):

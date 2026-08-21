@@ -1,0 +1,50 @@
+services:
+  mineru-api:
+    build:
+      context: .
+      dockerfile: MinerU.Dockerfile
+    image: mineru:latest
+    container_name: comet-mineru-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18000:8000"
+    environment:
+      MINERU_MODEL_SOURCE: local
+      MINERU_DEVICE_MODE: cpu
+      MINERU_VIRTUAL_VRAM_SIZE: "2"
+      MINERU_PROCESSING_WINDOW_SIZE: "2"
+      NVIDIA_DISABLE_REQUIRE: "1"
+    entrypoint: mineru-api
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+
+  mineru-comet-adapter:
+    build:
+      context: ./adapter
+    image: comet-mineru-adapter:latest
+    container_name: comet-mineru-adapter
+    restart: unless-stopped
+    environment:
+      MINERU_UPSTREAM: http://mineru-api:8000
+      MINERU_POLL_SECONDS: "2"
+      MINERU_TIMEOUT_SECONDS: "1800"
+      MINERU_BACKEND: pipeline
+      MINERU_IMAGE_ANALYSIS: "false"
+    ports:
+      - "127.0.0.1:18080:18080"
+    depends_on:
+      - mineru-api

@@ -1,3 +1,0 @@
-{"id":"person-alias-001","left":"林晓","right":"我妹妹林晓","label":true,"difficulty":"alias","entity_type":"人物"}
-{"id":"person-hard-negative-001","left":"张伟（同事）","right":"张伟（医生）","label":false,"difficulty":"same_name","entity_type":"人物"}
-{"id":"place-alias-001","left":"北京大学","right":"北大","label":true,"difficulty":"alias","entity_type":"机构"}

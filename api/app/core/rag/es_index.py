@@ -28,6 +28,10 @@ _MAPPING = {
             "chunk_id": {"type": "keyword"},
             "chunk_type": {"type": "keyword"},  # child | parent | image_desc
             "parent_id": {"type": "keyword"},  # child 指向其 parent chunk_id
+            "root_id": {"type": "keyword"},
+            "root_title": {"type": "keyword"},
+            "model_tokens": {"type": "keyword"},
+            "chunk_schema": {"type": "keyword"},
             "document_version_id": {"type": "keyword"},
             "chunk_strategy": {"type": "keyword"},
             "section_path": {"type": "keyword"},
@@ -39,6 +43,8 @@ _MAPPING = {
             "logical_table_ids": {"type": "keyword"},
             "artifact_paths": {"type": "keyword", "index": False},
             "block_anchors": {"type": "object", "enabled": False},
+            "chunk_role": {"type": "keyword"},
+            "neighbor_context_pages": {"type": "integer"},
             # content 用 IK 中文分词：写入 ik_max_word（细粒度），查询 ik_smart（粗粒度）
             "content": {
                 "type": "text",

@@ -29,6 +29,8 @@ export const PROVIDER_OPTIONS: { label: string; value: Provider }[] = [
 ]
 
 // 各 provider 默认 base_url，与后端 provider.py 保持一致
+PROVIDER_OPTIONS.push({ label: 'Local Docker / TEI', value: 'local' })
+
 export const PROVIDER_DEFAULT_BASE_URL: Record<Provider, string> = {
   openai: 'https://api.openai.com/v1',
   qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -37,6 +39,7 @@ export const PROVIDER_DEFAULT_BASE_URL: Record<Provider, string> = {
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   qianfan: '',
   tavily: '',
+  local: 'http://bge-reranker:80',
 }
 
 export const CAPABILITY_OPTIONS = [

@@ -32,6 +32,7 @@ from app.controllers import (
     project_controller,
     product_event_controller,
     research_controller,
+    rbac_controller,
     search_controller,
     skill_controller,
     tag_controller,
@@ -66,6 +67,7 @@ api_router.include_router(dashboard_controller.router)
 api_router.include_router(emotion_controller.router)
 api_router.include_router(music_controller.router)
 api_router.include_router(research_controller.router)
+api_router.include_router(rbac_controller.router)
 api_router.include_router(agent_task_controller.router)
 api_router.include_router(notify_controller.router)
 api_router.include_router(skill_controller.router)

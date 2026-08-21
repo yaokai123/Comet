@@ -38,6 +38,7 @@ export default function ModelConfigModal({
           base_url: editing.base_url,
           capability: editing.capability,
           is_default: editing.is_default,
+          wire_api: editing.wire_api,
         })
       } else {
         form.resetFields()
@@ -47,6 +48,7 @@ export default function ModelConfigModal({
           base_url: PROVIDER_DEFAULT_BASE_URL.deepseek,
           capability: [],
           is_default: false,
+          wire_api: 'chat_completions',
         })
       }
     }
@@ -54,7 +56,10 @@ export default function ModelConfigModal({
 
   // provider 变化时自动填默认 base_url
   const onProviderChange = (p: Provider) => {
-    form.setFieldsValue({ base_url: PROVIDER_DEFAULT_BASE_URL[p] })
+    form.setFieldsValue({
+      base_url: PROVIDER_DEFAULT_BASE_URL[p],
+      wire_api: p === 'local' ? 'tei' : 'chat_completions',
+    })
   }
 
   return (

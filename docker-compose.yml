@@ -24,7 +24,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
       - "9200:9200"
     volumes:
@@ -98,6 +98,10 @@ services:
     container_name: comet-api
     env_file:
       - .env
+      # Keep application secrets aligned with host-side API tooling. Values in
+      # this later file override duplicate root entries; service addresses below
+      # remain explicitly pinned to Docker DNS names.
+      - ./api/.env
     environment:
       POSTGRES_HOST: postgres
       ES_HOST: http://elasticsearch:9200
@@ -106,6 +110,11 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       CONNECTOR_LOCAL_ROOTS: /connector-data
+      # MinerU runs in its own compose project and publishes the adapter on the
+      # Windows host. Keep the full /parse endpoint explicit so PDF ingestion
+      # cannot silently look "MinerU-enabled" while using PyMuPDF instead.
+      MINERU_ENDPOINT: ${MINERU_ENDPOINT:-http://host.docker.internal:18080/parse}
+      MINERU_TIMEOUT_SECONDS: ${MINERU_TIMEOUT_SECONDS:-1800}
     ports:
       - "8000:8000"
     volumes:
@@ -124,9 +133,13 @@ services:
   worker:
     build: ./api
     container_name: comet-worker
-    command: celery -A app.celery_app.celery_app worker -l info -Q default,parse,memory,beat,research,knowledge --pool=threads --concurrency=10
+    # Async task entrypoints use asyncio.run() and process-global HTTP/ES/Redis
+    # clients. Process isolation prevents concurrent event loops from closing or
+    # reusing another task's client; the threads pool is unsafe for this design.
+    command: celery -A app.celery_app.celery_app worker -l info -Q default,parse,memory,beat,research,knowledge --pool=prefork --concurrency=1
     env_file:
       - .env
+      - ./api/.env
     environment:
       POSTGRES_HOST: postgres
       ES_HOST: http://elasticsearch:9200
@@ -135,6 +148,13 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       CONNECTOR_LOCAL_ROOTS: /connector-data
+      MINERU_ENDPOINT: ${MINERU_ENDPOINT:-http://host.docker.internal:18080/parse}
+      MINERU_TIMEOUT_SECONDS: ${MINERU_TIMEOUT_SECONDS:-1800}
+      # The local BGE-M3 endpoint supports larger batches than the conservative
+      # cloud-provider default. One batch per parse process avoids GPU overload;
+      # prefork still runs separate documents in parallel.
+      EMBED_BATCH_SIZE: "80"
+      EMBED_CONCURRENCY: "1"
     volumes:
       - ./api/storage:/app/storage
       - ${CONNECTOR_LOCAL_PATH:-./connector-data}:/connector-data:ro

@@ -137,10 +137,20 @@ def _candidate_count(state: dict[str, Any]) -> int | None:
 
 def _safe_stage_metadata(patch: dict[str, Any]) -> dict[str, Any]:
     metadata: dict[str, Any] = {"updated_keys": sorted(patch)}
-    for key in ("strategy", "model", "fallback", "expanded_query_count"):
+    for key in (
+        "strategy",
+        "model",
+        "fallback",
+        "fallback_reason",
+        "expanded_query_count",
+        "llm_query_count",
+        "timeout_seconds",
+    ):
         value = patch.get(key)
         if isinstance(value, (str, int, float, bool)):
             metadata[key] = value
+    if isinstance(patch.get("query_plan"), dict):
+        metadata["query_plan"] = patch["query_plan"]
     return metadata
 
 

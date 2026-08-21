@@ -8,6 +8,7 @@ files/
 .vscode/
 .idea/
 .kiro/
+.claude/
 
 # ===== 环境变量与密钥 =====
 .env
@@ -28,6 +29,7 @@ __pycache__/
 *$py.class
 *.so
 .pytest_cache/
+.pytest-tmp/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -60,9 +62,15 @@ api/celerybeat-schedule.dat
 web/tsconfig.tsbuildinfo
 api/celerybeat-schedule.bak
 
+# ===== 运行时上传与解析产物 =====
+storage/
+api/storage/*
+!api/storage/.gitkeep
+
 # ===== 评测（eval）=====
 api/eval/results/*
 !api/eval/results/README.md
 api/eval/cache/
+api/eval/data/
 # 评测脚本与 fixtures 进 git，密钥文件不进、模板要进
 !.env.eval.example

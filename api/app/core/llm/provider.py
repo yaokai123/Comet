@@ -47,14 +47,15 @@ async def test_connection(
                     },
                 )
             elif type_ == "rerank":
+                payload = (
+                    {"query": "ping", "texts": ["doc"], "raw_scores": False}
+                    if wire_api == "tei"
+                    else {"model": model_name, "query": "ping", "documents": ["doc"]}
+                )
                 resp = await client.post(
                     f"{base}/rerank",
                     headers=headers,
-                    json={
-                        "model": model_name,
-                        "query": "ping",
-                        "documents": ["doc"],
-                    },
+                    json=payload,
                 )
             elif wire_api == "responses":
                 payload: dict = {

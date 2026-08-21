@@ -146,25 +146,26 @@ class EnterpriseKnowledgeService:
                 )
             ).all()
         )
-        output: list[dict] = []
-        for page in pages:
-            latest = await self.session.scalar(
-                select(WikiPageVersion)
-                .where(WikiPageVersion.page_id == page.id)
-                .order_by(WikiPageVersion.version_no.desc())
-                .limit(1)
-            )
-            output.append(
-                {
-                    "id": str(page.id),
-                    "slug": page.slug,
-                    "title": page.title,
-                    "status": page.status,
-                    "version": latest.version_no if latest else None,
-                    "updated_at": page.updated_at.isoformat() if page.updated_at else None,
-                }
-            )
-        return output
+        page_ids = [page.id for page in pages]
+        latest_version_rows = []
+        if page_ids:
+            latest_versions = select(
+                WikiPageVersion.page_id,
+                func.max(WikiPageVersion.version_no).label("version_no"),
+            ).where(WikiPageVersion.page_id.in_(page_ids)).group_by(WikiPageVersion.page_id)
+            latest_version_rows = list((await self.session.execute(latest_versions)).all())
+        latest_version_by_page = dict(latest_version_rows)
+        return [
+            {
+                "id": str(page.id),
+                "slug": page.slug,
+                "title": page.title,
+                "status": page.status,
+                "version": latest_version_by_page.get(page.id),
+                "updated_at": page.updated_at.isoformat() if page.updated_at else None,
+            }
+            for page in pages
+        ]
 
     async def get_wiki_page(
         self, user_id: uuid.UUID, kb_id: uuid.UUID, page_id: uuid.UUID

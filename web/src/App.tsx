@@ -26,6 +26,7 @@ import ReportSharePage from './pages/ReportSharePage'
 import JoinGroupPage from './pages/JoinGroupPage'
 import TracesPage from './pages/TracesPage'
 import ProjectsPage from './pages/ProjectsPage'
+import AccessControlPage from './pages/AccessControlPage'
 import ProjectDetailPage from './pages/ProjectDetailPage'
 import RequireAuth from './components/RequireAuth'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -72,6 +73,7 @@ export default function App() {
             <Route path="settings/skills" element={<SkillPage />} />
             <Route path="settings/tools" element={<ToolConfigPage />} />
             <Route path="settings/notify" element={<NotifyChannelPage />} />
+            <Route path="settings/access" element={<AccessControlPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

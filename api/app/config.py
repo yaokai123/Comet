@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     redis_max_connections: int = 50
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
+    document_index_job_stale_seconds: int = 2100
 
     # 文件存储
     storage_backend: str = "local"  # local | oss
@@ -86,6 +87,9 @@ class Settings(BaseSettings):
     connector_max_file_bytes: int = 50 * 1024 * 1024
     knowledge_query_expansion_enabled: bool = True
     knowledge_query_expansion_count: int = 3
+    knowledge_query_expansion_timeout_seconds: float = 4.0
+    knowledge_answer_generation_timeout_seconds: float = 30.0
+    knowledge_root_cache_ttl_seconds: int = 900
     mineru_endpoint: str = ""  # full HTTP endpoint returning content_list JSON
     mineru_api_key: str = ""
     mineru_timeout_seconds: int = 300

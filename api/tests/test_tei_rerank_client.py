@@ -1,9 +1,11 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
 from app.core.llm import client as client_module
 from app.core.llm.client import LLMClient
+from app.core.llm.resolver import _api_key
 
 
 @pytest.mark.parametrize(
@@ -51,3 +53,12 @@ def test_tei_rerank_request_and_response(monkeypatch):
 def test_tei_rerank_empty_documents_skips_request():
     reranker = LLMClient("http://local", "local", "model", wire_api="tei")
     assert asyncio.run(reranker.rerank("query", [], top_n=5)) == []
+
+
+def test_local_model_config_does_not_require_encrypted_placeholder_key():
+    config = SimpleNamespace(
+        api_key_encrypted="",
+        base_url="http://bge-reranker:80",
+    )
+
+    assert _api_key(config) == "local"

@@ -13,6 +13,7 @@ export interface KnowledgeBase {
   icon: string | null
   color: string | null
   project_id?: string | null
+  organization_id?: string | null
   is_default: boolean
   chat_enabled: boolean
   doc_count: number
@@ -26,6 +27,7 @@ export interface KnowledgeBaseInput {
   icon?: string | null
   color?: string | null
   project_id?: string | null
+  organization_id?: string | null
 }
 
 export const knowledgeBaseApi = {

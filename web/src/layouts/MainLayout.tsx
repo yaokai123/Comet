@@ -20,6 +20,7 @@ import {
   PlusOutlined,
   RobotOutlined,
   SearchOutlined,
+  SafetyCertificateOutlined,
   SettingOutlined,
   ShareAltOutlined,
   StarOutlined,
@@ -88,6 +89,7 @@ const menuItems = [
       { key: '/settings/skills', icon: <ThunderboltOutlined />, label: '技能' },
       { key: '/settings/tools', icon: <ToolOutlined />, label: '工具配置' },
       { key: '/settings/notify', icon: <BellOutlined />, label: '消息推送' },
+      { key: '/settings/access', icon: <SafetyCertificateOutlined />, label: '企业权限' },
     ],
   },
 ]
@@ -214,7 +216,7 @@ export default function MainLayout() {
       groupByKeys('核心工作', ['/', '/capture', '/projects', '/chat', '/knowledge', '/memory']),
       groupByKeys('自动化与探索', ['/research', '/agent-tasks', '/group-chat', '/graph', '/traces']),
       groupByKeys('资料与偏好', ['/search', '/favorites', '/images', '/music']),
-      groupByKeys('设置', ['/settings/models', '/settings/agent', '/settings/skills', '/settings/tools', '/settings/notify']),
+      groupByKeys('设置', ['/settings/models', '/settings/agent', '/settings/skills', '/settings/tools', '/settings/notify', '/settings/access']),
     ]
     // 给「定时任务」注入未读红点（不改全局静态 menuItems）
     const items = informationArchitecture.map((group) =>

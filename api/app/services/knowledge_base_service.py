@@ -6,10 +6,12 @@
 """
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BizError
 from app.core.logging import get_logger
+from app.core.rbac import RBACService
 from app.core.rag.es_store import delete_by_source
 from app.core.storage import get_storage
 from app.models.knowledge_base_model import KnowledgeBase
@@ -33,18 +35,19 @@ class KnowledgeBaseService:
         self.img_repo = ImageRepository(session)
 
     async def _get_or_404(
-        self, user_id: uuid.UUID, kb_id: uuid.UUID
+        self, user_id: uuid.UUID, kb_id: uuid.UUID, permission: str = "knowledge_base.read"
     ) -> KnowledgeBase:
-        kb = await self.repo.get(user_id, kb_id)
-        if not kb:
-            raise BizError("知识库不存在", code=3040, status_code=404)
-        return kb
+        return await RBACService(self.session).require_kb(user_id, kb_id, permission)
 
     async def list_kbs(self, user_id: uuid.UUID) -> list[dict]:
         """列出全部知识库（含文档/图片实时计数）。确保默认库存在。"""
         await self.repo.ensure_default(user_id)
-        kbs = await self.repo.list_by_user(user_id)
-        counts = await self.repo.counts(user_id)
+        ids = [uuid.UUID(value) for value in await RBACService(self.session).allowed_kb_ids(user_id, "knowledge_base.read")]
+        kbs = list((await self.session.scalars(
+            select(KnowledgeBase).where(KnowledgeBase.id.in_(ids)).order_by(
+                KnowledgeBase.is_default.desc(), KnowledgeBase.created_at.asc())
+        )).all()) if ids else []
+        counts = await self.repo.counts(user_id, ids)
         out: list[dict] = []
         for kb in kbs:
             c = counts.get(kb.id, {})
@@ -56,6 +59,8 @@ class KnowledgeBaseService:
     ) -> dict:
         if body.project_id:
             await ProjectService(self.session).get_owned(user_id, body.project_id)
+        if body.organization_id:
+            await RBACService(self.session).require_org(user_id, body.organization_id, "knowledge_base.create")
         kb = KnowledgeBase(
             user_id=user_id,
             name=body.name.strip(),
@@ -63,6 +68,7 @@ class KnowledgeBaseService:
             icon=body.icon or "📁",
             color=body.color or "#155EEF",
             project_id=body.project_id,
+            organization_id=body.organization_id,
             is_default=False,
         )
         await self.repo.create(kb)
@@ -72,7 +78,7 @@ class KnowledgeBaseService:
     async def update(
         self, user_id: uuid.UUID, kb_id: uuid.UUID, body: KnowledgeBaseUpdate
     ) -> dict:
-        kb = await self._get_or_404(user_id, kb_id)
+        kb = await self._get_or_404(user_id, kb_id, "knowledge_base.write")
         if body.name is not None:
             kb.name = body.name.strip()
         if body.description is not None:
@@ -84,6 +90,9 @@ class KnowledgeBaseService:
         if body.project_id is not None:
             await ProjectService(self.session).get_owned(user_id, body.project_id)
             kb.project_id = body.project_id
+        if body.organization_id is not None and body.organization_id != kb.organization_id:
+            await RBACService(self.session).require_org(user_id, body.organization_id, "knowledge_base.create")
+            kb.organization_id = body.organization_id
         await self.repo.save(kb)
         counts = (await self.repo.counts(user_id)).get(kb.id, {})
         return self._to_out(
@@ -94,7 +103,7 @@ class KnowledgeBaseService:
         self, user_id: uuid.UUID, kb_id: uuid.UUID, enabled: bool
     ) -> dict:
         """设置某知识库是否参与对话检索。"""
-        kb = await self._get_or_404(user_id, kb_id)
+        kb = await self._get_or_404(user_id, kb_id, "knowledge_base.write")
         kb.chat_enabled = enabled
         await self.repo.save(kb)
         counts = (await self.repo.counts(user_id)).get(kb.id, {})
@@ -111,7 +120,7 @@ class KnowledgeBaseService:
 
     async def delete(self, user_id: uuid.UUID, kb_id: uuid.UUID) -> None:
         """物理删除知识库及其全部文档/图片（ES chunk + OSS 文件 + PG 级联）。"""
-        kb = await self._get_or_404(user_id, kb_id)
+        kb = await self._get_or_404(user_id, kb_id, "knowledge_base.manage")
         if kb.is_default:
             raise BizError("默认知识库不可删除", code=3041, status_code=400)
 
@@ -121,13 +130,13 @@ class KnowledgeBaseService:
         storage = get_storage()
         for d in docs:
             try:
-                await delete_by_source(str(user_id), str(d.id))
+                await delete_by_source(str(d.user_id), str(d.id))
                 await storage.delete(d.file_key)
             except Exception as e:
                 logger.warning("删库清理文档失败（跳过 %s）: %s", d.id, e)
         for im in imgs:
             try:
-                await delete_by_source(str(user_id), str(im.id))
+                await delete_by_source(str(im.user_id), str(im.id))
                 await storage.delete(im.file_key)
             except Exception as e:
                 logger.warning("删库清理图片失败（跳过 %s）: %s", im.id, e)
@@ -151,6 +160,7 @@ class KnowledgeBaseService:
             "icon": kb.icon,
             "color": kb.color,
             "project_id": str(kb.project_id) if kb.project_id else None,
+            "organization_id": str(kb.organization_id) if kb.organization_id else None,
             "is_default": kb.is_default,
             "chat_enabled": kb.chat_enabled,
             "doc_count": doc_count,

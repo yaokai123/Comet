@@ -107,18 +107,45 @@ class AdaptiveChunker:
             groups = self._heuristic_groups(document)
         else:
             groups = self._recursive_groups(document)
-        return self._materialize(groups, strategy)
+        return self._with_neighbor_context(self._materialize(groups, strategy))
+
+    @staticmethod
+    def _atomic(block: DocumentBlock) -> bool:
+        return block.kind in {
+            BlockKind.TABLE,
+            BlockKind.TABLE_ROW,
+            BlockKind.IMAGE,
+            BlockKind.CHART,
+            BlockKind.FORMULA,
+        }
 
     def _heading_groups(self, document: DocumentIR) -> list[list[DocumentBlock]]:
         groups: list[list[DocumentBlock]] = []
         current: list[DocumentBlock] = []
         current_path: tuple[str, ...] | None = None
         for block in document.ordered_blocks():
+            if self._atomic(block):
+                if current:
+                    groups.append(current)
+                    current = []
+                groups.append([block])
+                if block.section_path:
+                    current_path = block.section_path
+                continue
             path = block.section_path
+            current_pages = {
+                item.anchor.page for item in current if item.anchor.page is not None
+            }
+            page_boundary = bool(
+                current
+                and block.anchor.page is not None
+                and current_pages
+                and block.anchor.page not in current_pages
+            )
             boundary = block.kind in {BlockKind.TITLE, BlockKind.HEADING} or (
                 path and current_path is not None and path != current_path
             )
-            if boundary and current:
+            if (boundary or page_boundary) and current:
                 groups.append(current)
                 current = []
             current.append(block)
@@ -133,7 +160,7 @@ class AdaptiveChunker:
         current: list[DocumentBlock] = []
         tokens = 0
         for block in document.ordered_blocks():
-            atomic = block.kind in {BlockKind.TABLE, BlockKind.TABLE_ROW, BlockKind.IMAGE, BlockKind.CHART}
+            atomic = self._atomic(block)
             block_tokens = count_tokens(block.retrieval_text)
             if atomic:
                 if current:
@@ -141,7 +168,16 @@ class AdaptiveChunker:
                     current, tokens = [], 0
                 groups.append([block])
                 continue
-            if current and tokens + block_tokens > self.parent_tokens:
+            current_pages = {
+                item.anchor.page for item in current if item.anchor.page is not None
+            }
+            page_boundary = bool(
+                current
+                and block.anchor.page is not None
+                and current_pages
+                and block.anchor.page not in current_pages
+            )
+            if current and (tokens + block_tokens > self.parent_tokens or page_boundary):
                 groups.append(current)
                 current, tokens = [], 0
             current.append(block)
@@ -254,11 +290,54 @@ class AdaptiveChunker:
                                 "block_id": block.block_id,
                                 "page": block.anchor.page,
                                 "bbox": list(block.anchor.bbox) if block.anchor.bbox else None,
+                                "sheet_name": block.metadata.get("sheet_name"),
+                                "row_number": block.metadata.get("row_number"),
                             }
                             for block in group
                         ],
                     },
                 )
+            )
+        return chunks
+
+    def _with_neighbor_context(self, chunks: list[KnowledgeChunk]) -> list[KnowledgeChunk]:
+        """Add bounded adjacent-page text for recall without widening citation roots."""
+        for index, chunk in enumerate(chunks):
+            role = (
+                "table"
+                if any(kind in {BlockKind.TABLE.value, BlockKind.TABLE_ROW.value} for kind in chunk.element_types)
+                else "narrative"
+            )
+            chunk.metadata["chunk_role"] = role
+            neighbors: list[KnowledgeChunk] = []
+            for neighbor_index in (index - 1, index + 1):
+                if neighbor_index < 0 or neighbor_index >= len(chunks):
+                    continue
+                neighbor = chunks[neighbor_index]
+                if chunk.page_start is None or neighbor.page_start is None:
+                    continue
+                if abs(chunk.page_start - neighbor.page_start) > 1:
+                    continue
+                neighbors.append(neighbor)
+            if not neighbors:
+                chunk.metadata["neighbor_context_pages"] = []
+                continue
+            neighbor_parts = []
+            neighbor_pages = []
+            for neighbor in neighbors:
+                snippet = re.sub(r"\s+", " ", neighbor.content).strip()[:700]
+                if not snippet:
+                    continue
+                neighbor_parts.append(
+                    f"Adjacent page {neighbor.page_start} context: {snippet}"
+                )
+                neighbor_pages.append(neighbor.page_start)
+            if neighbor_parts:
+                chunk.retrieval_text = "\n".join(
+                    [chunk.retrieval_text, *neighbor_parts]
+                )
+            chunk.metadata["neighbor_context_pages"] = list(
+                dict.fromkeys(neighbor_pages)
             )
         return chunks
 

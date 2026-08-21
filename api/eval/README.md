@@ -1,106 +1,109 @@
-# Comet 离线评测（eval）
+# 企业知识库四基准评测
 
-用业界标准指标和 RAGAS，**自包含、可复现、可审计**地评测 RAG 检索与记忆系统（抽取 / 去重 / 检索 / 生成）。
+评测主线只保留四套与企业知识库直接相关的公开数据：
 
-> 自带语料和标注、自己写入再评测，**不依赖现有用户数据、不读 app 的模型配置表**——直接填模型 key 就能跑。
-> 不进生产镜像（`api/.dockerignore` 已排除 `eval/`），但进 git / 开源供他人复现。
+| Benchmark | 默认样本 | 主要能力 | 默认来源 |
+|---|---:|---|---|
+| FinanceBench | 150 | 财报 PDF、证据页、数值问答、引用 | `PatronusAI/financebench` |
+| TAT-QA | 500 | 表格+正文联合检索和数值推理 | `next-tat/TAT-QA` dev |
+| CRUD-RAG | 200 | 中文问答、摘要、幻觉识别 | `IAAR-Shanghai/CRUD_RAG` |
+| ViDoRe V3 | 200 | 图片、图表、页级检索、BBox | `vidore/vidore_v3_finance_en` |
 
----
+旧的不适配评测资产已移除，避免项目指标与企业知识库目标混杂。
 
-## 设计要点
+## 数据准备
 
-- **独立配置**：`eval/.env.eval` 直接填 embedding/chat/rerank 的 base_url+model+key，用 `LLMClient` 直接建客户端，不依赖系统里建用户/配模型。
-- **固定命名空间**：所有评测数据写在 `EVAL_USER_ID`（固定 UUID）名下，与真实用户隔离，可一键清理。
-- **写入到评测全闭环**：`setup` 复用 app 真实的分块/向量化/萃取链路把 fixtures 写进 ES/Neo4j（顺带也验证了写入链路），再评测。
-- **双输出**：① 数值报告（Markdown 指标表）② 明细（JSON：每题召回了啥/命中没、每段抽了啥 vs gold），看明细可定位问题、调系统策略。
-- **RAGAS 端到端评测**：对检索上下文和最终回答测 Context Precision、Context Recall、Faithfulness、Answer Relevancy 与 Factual Correctness；同时保留确定性检索指标，避免完全依赖 LLM-as-a-Judge。
-- **可审计清单**：每次 RAGAS 运行记录数据集 SHA-256、Git SHA、RAGAS 版本、生成/裁判/向量模型、逐题上下文与异常；默认关闭 RAGAS 遥测。
-- **企业 PDF 专项**：`enterprise_rag` scorecard 将正文、表格、图片和跨页表格分组统计 Recall/MRR/nDCG 与引用正确性，避免总体均值掩盖结构化内容退化。
-
----
-
-## 目录
-
-```
-eval/
-├── .env.eval.example     模型配置模板（复制为 .env.eval 填 key）
-├── eval_config.py        读 .env.eval 建 client + EVAL_USER_ID
-├── metrics.py            标准指标：Recall@k/Prec@k/MRR/nDCG、集合P/R/F1、Pairwise F1
-├── clients.py            ES 检索变体（纯向量/BM25/混合/+rerank）+ 客户端清理
-├── fixtures/             自带测试数据
-│   ├── corpus/*.md       知识库语料（写入 ES）
-│   ├── dialogues.json    对话（萃取进 Neo4j）
-│   └── gold/             标注集 retrieval / memory_retrieval / extraction / dedup
-├── pipeline/
-│   ├── setup.py          写入：语料→ES、对话→Neo4j（EVAL_USER_ID 名下）
-│   └── teardown.py       清理：删 EVAL_USER_ID 的 ES + Neo4j 数据
-├── tasks/
-│   ├── retrieval.py      RAG 四配置 + 记忆检索
-│   ├── extraction.py     抽取 实体级/三元组级 P/R/F1
-│   └── dedup.py          去重 Pairwise P/R/F1
-├── reporters.py          输出报告 + 明细
-├── run_eval.py           ⭐ 总入口
-└── results/              报告与明细（运行产物 git 忽略，留档规范进 git）
-```
-
-## 自带数据集场景
-
-对齐业界标准评测的题型设计，开箱即可跑：
-
-- **RAG 检索**（仿 BEIR / NQ / HotpotQA 开放域问答）：`fixtures/corpus/` 10 篇通用百科（居里夫人、镭、诺贝尔奖、青霉素、长城、珠峰、大熊猫、光合作用、太阳系、长江），`gold/retrieval.json` 22 题，含**单跳**（答案在单篇）与**多跳**（需跨多篇，如「发现镭的科学家获了什么奖」要串起居里夫人↔诺贝尔奖）。
-- **记忆系统**(中文长对话个人陈述):`fixtures/dialogues.json` 是同一人设跨多段的个人陈述(上海产品经理、老家成都、复旦新闻系、养布偶猫团子、爱爬山摄影、学日语、喝拿铁、用 iPhone+索尼相机、妹妹林晓在成都);gold 的抽取三元组**严格使用受控词表谓词**(属于类型 / 位于 / 拥有 / 偏好 / 了解 / 使用 / 关联于…)。**项目记忆萃取流水线为中文优先**,prompts 与受控词表全中文,英文场景不在评测覆盖内(原计划接入的 LongMemEval-S 已下架,避免翻译噪声与实体名失真)。
-- **RAGAS**：`gold/ragas.json` 含 12 条中文参考答案、相关文档 ID 与题型标注，覆盖单跳、多来源与跨文档多跳。参考答案只使用仓库内语料可支持的事实。
-- **CMRC 2018 大规模 RAGAS**：使用人工标注的中文维基百科阅读理解验证集（3,219 题）构造封闭检索语料；固定 Hugging Face revision 与随机种子，按答案/上下文长度分层采样，并混入训练集文档作为 distractor。相关文档强制进入 corpus，问答只取 validation，避免训练问题泄漏。
-
-> 想换成贴合自己数据的场景，直接替换 `fixtures/` 下对应文件即可（语料文件名即 `relevant_doc_ids`）。
-
-## 准备
-
-1. 起存储：`docker compose up -d postgres elasticsearch neo4j redis`。
-2. 复制 `eval/.env.eval.example` → `eval/.env.eval`，填 embedding（必需）、chat（必需）、rerank（可选）的 key。
-3. （可选）把 `fixtures/` 的语料/对话/gold 换成你自己的，更贴合真实数据。
-
-正式测评建议额外配置 `RAGAS_JUDGE_*`，并选择与 `EVAL_CHAT_*` 不同家族的裁判模型；若不配置会回退复用生成模型。`RAGAS_EMBED_*` 同理会回退到 `EVAL_EMBED_*`。
-
-## 运行（在 api/ 目录）
+在 `api/` 目录运行：
 
 ```bash
-uv run python -m eval.run_eval                  # 全流程：模型自检 + 写入 + 全部评测（保留数据）
-uv run python -m eval.run_eval --reset          # 重跑：先清空旧数据再写入（推荐，记忆写入非幂等）
-uv run python -m eval.run_eval --skip-setup     # 数据已写过，直接评测
-uv run python -m eval.run_eval --skip-check     # 跳过模型可用性自检
-uv run python -m eval.run_eval --only retrieval # 只跑 RAG 检索（retrieval/memory/extraction/dedup）
-uv run python -m eval.run_eval --teardown       # 跑完清理评测数据
-# 默认标准档：CMRC validation 200 题 + 约 1000 篇文档
-uv run python -m eval.run_eval --benchmark ragas --ragas-profile standard --top-k 5
-
-# 快速回归：仓库内 12 题
-uv run python -m eval.run_eval --benchmark ragas --ragas-profile smoke --reset
-
-# 严格档：CMRC validation 500 题 + 约 3000 篇文档（成本较高）
-uv run python -m eval.run_eval --benchmark ragas --ragas-profile rigorous --top-k 5
-
-# 自定义规模（corpus 必须不少于 sample）
-uv run python -m eval.run_eval --benchmark ragas --sample 300 --ragas-corpus-limit 1500
+uv run python -m eval.benchmarks.fetch --with-financebench-pdfs
 ```
 
-> 正式跑前会先做**模型可用性自检**：分别调用 embedding / chat / rerank 确认连得通（embedding 还会校验维度是否与 ES 索引一致），不通的必需模型直接中止、rerank 不通则自动跳过其对比列，避免灌了一半数据才发现 key/url 写错。
-> 全程带**进度日志**（写入第几篇语料 / 第几段对话萃取、评测第几题），方便看卡在哪一步。
+命令下载前三套标注文件，并按 FinanceBench 的 `doc_link` 下载每份唯一源 PDF 到 `eval/data/financebench/pdfs/`；已有非空 PDF 会跳过。若只需调试 loader，可去掉 `--with-financebench-pdfs`。该目录被 Git 忽略。ViDoRe 通过 Hugging Face `datasets` 按需获取；默认 finance-en 数据约 1.29 GB，首次运行前请确认磁盘和网络条件。
 
-普通结果在 `eval/results/`。RAGAS 结果位于 `eval/results/ragas/<UTC-run-id>/`，包含 `manifest.json`、`samples.jsonl`、`summary.json` 与 `report.md`，并报告均值的 95% bootstrap 置信区间。只有 `metric_error_count = 0` 的完整运行才适合用于对外指标声明。
+第三方数据不提交仓库。使用或发布结果前必须复核对应数据卡及原始文档许可证，尤其是 FinanceBench 的 CC BY-NC 4.0 和 ViDoRe 原始 PDF 的上游许可。
 
-## 指标
+## 生成统一评测包
 
-| 任务 | 指标 |
-|------|------|
-| RAG 检索（四配置）| Recall@k、Precision@k、MRR、nDCG@k |
-| 记忆检索 | Recall@k、Precision@k、MRR、nDCG@k |
-| 三元组抽取 | 实体级 / 三元组级 Precision、Recall、F1 |
-| 实体去重 | Pairwise Precision、Recall、F1 |
-| RAGAS 端到端 | Context Precision/Recall、Faithfulness、Answer Relevancy、Factual Correctness |
+```bash
+uv run python -m eval.run_eval --benchmark financebench
+uv run python -m eval.run_eval --benchmark tatqa --sample 500
+uv run python -m eval.run_eval --benchmark crud-rag --sample 200
+uv run python -m eval.run_eval --benchmark vidore --sample 200
+```
 
-## 诚实声明
+输出到 `eval/results/prepared/<benchmark>/`：
 
-`smoke` 与 L1 项目属于**小规模自建 gold 集**的离线自测；`standard/rigorous` 使用 CMRC 2018 公共数据。RAGAS 的 LLM-as-a-Judge 分数会受裁判模型、提示词和版本影响，不能与其他配置下的分数直接横向比较。简历/汇报请同时披露样本规模、RAGAS 版本、生成模型、裁判模型、top-k 与数据集哈希。
+- `cases.jsonl`：问题、答案、Gold source、BBox 和场景标签。
+- `corpus.jsonl`：统一后的文本/表格/页面语料。
+- `manifest.json`：样本数、随机种子和数据来源。
 
-CMRC 2018 standard/rigorous 属于公共基准，但它主要覆盖中文维基百科抽取式单跳问答，不能代表私有业务数据、多轮记忆或 DeepSearch 的全部效果。公开结果应标注数据集为 `hfl/cmrc2018`、validation split、profile、corpus 数量、seed 和置信区间，并按数据集要求保留原始论文引用与 CC BY-SA 4.0 署名。
+FinanceBench 的 `corpus.jsonl` 保存人工 Gold 页文本用于计分和审计，`asset_path` 指向完整源 PDF；实际 RAG 必须导入去重后的完整 PDF，不能只把 Gold evidence page 当检索语料。
+
+所有抽样固定 `seed=42`。可用 `--seed` 修改，但不同 seed 的结果不得直接作版本回归比较。
+
+## 预测协议与评分
+
+系统完成语料导入和查询后，每题输出一行：
+
+```json
+{"query_id":"q-1","answer":"答案","retrieved_source_ids":["page-3"],"cited_source_ids":["page-3"],"predicted_bboxes":{"page-3":[[0,0,100,80]]}}
+```
+
+评分：
+
+```bash
+uv run python -m eval.run_eval \
+  --benchmark financebench \
+  --predictions eval/results/predictions/financebench.jsonl \
+  --score-output eval/results/financebench-score.json
+```
+
+统一指标包括 Recall@k、MRR@k、nDCG@k、Citation Precision/Recall、Answer Exact Match、Answer Token F1 和 BBox IoU。没有 BBox Gold 的数据集不会被记为零，而是在该指标中输出 `null`。
+
+## ViDoRe 数据集切换
+
+默认固定 Finance EN 官方端到端评测 revision。切换工业文档时应显式清空默认 revision：
+
+```bash
+uv run python -m eval.run_eval \
+  --benchmark vidore \
+  --vidore-dataset vidore/vidore_v3_industrial \
+  --vidore-revision "" \
+  --sample 200
+```
+
+## 代码结构
+
+```text
+eval/benchmarks/
+├── schema.py              统一 case/corpus 契约
+├── scoring.py             统一确定性计分器
+├── suite.py               四基准 CLI
+├── fetch.py               官方标注下载
+├── financebench/loader.py
+├── tatqa/loader.py
+├── crud_rag/loader.py
+└── vidore/loader.py
+```
+
+## FinanceBench 完整 PDF 基线
+
+在 PostgreSQL、Elasticsearch 和已配置 Chat 模型可用时，可运行隔离的完整 PDF
+BM25 基线。该执行器使用生产父子分块、页码对齐和显式来源引用，不会写入现有知识库：
+
+```bash
+uv run python -m eval.benchmarks.financebench.runner --rebuild
+```
+
+结果写入 `eval/results/predictions/financebench-bm25.jsonl` 和
+`eval/results/financebench-bm25-score.json`。若模型返回空内容，可只续跑空答案：
+
+```bash
+uv run python -m eval.benchmarks.financebench.runner \
+  --resume-from eval/results/predictions/financebench-bm25.jsonl \
+  --max-tokens 2048
+```
+
+该命令是 BM25 基线，不应标记为向量或混合检索结果。运行向量版前应单独记录
+Embedding 模型、完整索引耗时和检索策略。

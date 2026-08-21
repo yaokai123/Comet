@@ -9,6 +9,7 @@ class KnowledgeBaseCreate(BaseModel):
     icon: str | None = Field(default=None, max_length=32, description="emoji 图标")
     color: str | None = Field(default=None, max_length=16, description="卡片主题色")
     project_id: uuid.UUID | None = None
+    organization_id: uuid.UUID | None = None
 
 
 class KnowledgeBaseUpdate(BaseModel):
@@ -17,6 +18,7 @@ class KnowledgeBaseUpdate(BaseModel):
     icon: str | None = Field(default=None, max_length=32)
     color: str | None = Field(default=None, max_length=16)
     project_id: uuid.UUID | None = None
+    organization_id: uuid.UUID | None = None
 
 
 class MoveToKbRequest(BaseModel):

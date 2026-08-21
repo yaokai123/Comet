@@ -142,6 +142,21 @@ async def search_documents(
     return success(hits)
 
 
+@router.post("/query-plan")
+async def inspect_query_plan(
+    body: SearchRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return the deterministic, authorization-bounded plan used by retrieval."""
+    from app.core.knowledge.query_planner import build_query_plan
+    from app.core.rbac import RBACService
+
+    allowed = await RBACService(session).allowed_kb_ids(user.id)
+    plan = await build_query_plan(session, body.query, allowed_kb_ids=allowed)
+    return success(plan.to_dict())
+
+
 @router.put("/{doc_id}/move")
 async def move_document(
     doc_id: uuid.UUID,

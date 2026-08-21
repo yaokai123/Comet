@@ -436,16 +436,18 @@ class ChatService:
             for key in BUILTIN_REGISTRY:
                 overrides[key] = key in whitelist
 
-        from app.repositories.knowledge_base_repository import (
-            KnowledgeBaseRepository,
-        )
+        from sqlalchemy import select
+        from app.core.rbac import RBACService
+        from app.models.knowledge_base_model import KnowledgeBase
 
         if skill and skill.kb_id:
-            kb_ids: list[str] | None = [str(skill.kb_id)]
+            allowed = set(await RBACService(self.session).allowed_kb_ids(user_id))
+            kb_ids: list[str] | None = [str(skill.kb_id)] if str(skill.kb_id) in allowed else []
         else:
-            kb_ids = await KnowledgeBaseRepository(self.session).list_chat_enabled_ids(
-                user_id
-            )
+            allowed = [uuid.UUID(value) for value in await RBACService(self.session).allowed_kb_ids(user_id)]
+            kb_ids = [str(value) for value in await self.session.scalars(
+                select(KnowledgeBase.id).where(KnowledgeBase.id.in_(allowed), KnowledgeBase.chat_enabled.is_(True))
+            )]
         return overrides, kb_ids
 
     async def _build_tools(

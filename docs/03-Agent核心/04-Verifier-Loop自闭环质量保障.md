@@ -26,7 +26,7 @@
 | 解耦原则 | 在 Comet 的实现 |
 |---------|----------------|
 | **Verify ⊥ Generate** | Verifier 独立 LLM session,不带 generator 上下文;支持跨 family 模型(SameModelVerifier 同模型基线 / CrossModelVerifier 跨家族 + 工厂自动降级)。 |
-| **Controller ⊥ Task** | `LoopController` 通用状态机,深度研究 + 定时任务 + HotpotQA A/B 共用同一实例,wire-up 只多一行。 |
+| **Controller ⊥ Task** | `LoopController` 通用状态机,深度研究 + 定时任务共用同一实例,wire-up 只多一行。 |
 | **State ⊥ Process** | 状态全在 DB(`loop_runs` + `loop_iterations` 两张表),worker 重启可恢复,有完整 audit trail。 |
 
 ---
@@ -51,15 +51,15 @@ flowchart TD
 
 ## 4. 核心设计与实现
 
-### 4.1 6 维 Rubric(直接对齐 ① RAGAS)
+### 4.1 6 维 Rubric
 
 | 维度 | 权重 | 评 0~5 | 单维硬门槛 | 对应离线指标 |
 |------|-----|-------|-----------|------------|
-| 覆盖度 coverage | 0.20 | 子问题覆盖完整度 | ≥3 | RAGAS context_recall |
-| 引用对齐 faithfulness | 0.25 | 论断与 [来源N] 匹配 | ≥3 | RAGAS faithfulness ⭐ |
+| 覆盖度 coverage | 0.20 | 子问题覆盖完整度 | ≥3 | Evidence Recall |
+| 引用对齐 faithfulness | 0.25 | 论断与 [来源N] 匹配 | ≥3 | Citation Precision / Recall |
 | 论证深度 depth | 0.15 | 论证而非罗列 | ≥2 | (人工质量) |
 | 时效性 timeliness | 0.15 | 关键事实是否最新 | ≥3 | 时间窗校验 |
-| 相关性 relevance | 0.15 | 切题不跑偏 | ≥3 | RAGAS answer_relevancy |
+| 相关性 relevance | 0.15 | 切题不跑偏 | ≥3 | Answer Relevancy / F1 |
 | 可读 readability | 0.10 | 结构与表达 | ≥2 | (人工质量) |
 
 加权总分 ≥ 0.75 + 全部维度过硬门槛 = 通过。
@@ -75,11 +75,7 @@ flowchart TD
 
 **工厂降级**:`build_verifier(kind='cross')` 找不到 verifier 模型时自动降级到 same 并 warning,可用性优先。
 
-**为什么不用同模型 self-critique**:HotpotQA A/B 实验(20 题/组)真实数据——
-- same 自评:judge 通过率 0% / EM 一致率 40%
-- cross(deepseek + glm-4-flash):judge 通过率 95% / EM 一致率 65%
-
-**结论:self-critique 不可用**,跨家族独立审稿才是数据驱动的工程必选。
+**为什么提供跨家族 Verifier**:同模型可能延续生成阶段的判断偏差。生产选择必须通过企业 Gold Set 比较漏检率、人工一致率、延迟和成本,而不是沿用不相关公开数据集的结论。
 
 ### 4.3 智能 Repair 策略(Policy 决策树)
 
@@ -126,7 +122,7 @@ class LoopController:
 接入点 wire-up **只多一行**:
 - 深度研究:`engine.py` 末尾 7 步汇总后接 `LoopController.run(task_type='research')`
 - 定时任务:`tasks/agent_task.py` 通过 `_check_loop_passed(report_id)` 反查 LoopRun,不合格不推送
-- 离线 A/B:HotpotQA runner 加 `--verifier {none,same,cross}` 接 qa_verifier
+- 离线 A/B:企业 Gold Set 对比 `same/cross` 的漏检率和人工一致率
 
 **核心代码只多一行 wire-up,直接证明 LoopController 抽象成立**。
 
@@ -170,11 +166,11 @@ HomePage 在 Agent 简报后渲染(无数据时不显示)。
 
 ## 8. 面试讲点(每条对应真决策 + 真数据)
 
-1. **解耦 Verify 与 Generate**:VerifierA(same) vs VerifierB(cross)真实数据对照——HotpotQA 20 题 same judge 通过率 0% / cross 95%,数据说话「为什么不能 self-critique」。
+1. **解耦 Verify 与 Generate**:VerifierA(same) 与 VerifierB(cross)使用企业 Gold Set 对照,按漏检率和人工一致率决策。
 2. **解耦 Controller 与 Task**:深度研究 + 定时任务 + 离线 A/B 三个场景共用同一抽象,只有 wire-up 改一行。
 3. **状态外置**:`loop_runs` + `loop_iterations` 两表,worker 重启可恢复,可中断恢复就是工程深度。
 4. **智能 Repair 决策树**:不是「不通过就重做」,是按问题类型选 Patch / Rewrite / Exceed,工程取舍。
-5. **Rubric 评测-生产一致性**:6 维 Rubric 直接对齐 ① RAGAS 的 faithfulness / context_recall / answer_relevancy,「离线发现的弱项就是生产防的弱项」。
+5. **Rubric 评测-生产一致性**:覆盖度、引用对齐和相关性分别对应离线 Evidence Recall、Citation P/R 与答案相关性。
 6. **跨模型对照实验**:不是直觉拍脑袋选 verifier,数据驱动选 cross。
 7. **明确边界**:不做普通对话 verifier、不做实时流式 verifier、不做用户配 Rubric——知道哪些不该做。
 
@@ -182,7 +178,7 @@ HomePage 在 Agent 简报后渲染(无数据时不显示)。
 
 ## 9. 简历话术(可直接用)
 
-> **Verifier Loop 自闭环质量保障**:实现 Generate→Verify→Repair 三段式 Loop——独立 Verifier(跨家族 LLM-as-judge)按 6 维 Rubric 评分,智能 Repair 策略(Patch/章节重写)按问题类型自动选,Controller 状态外置 DB 可中断恢复;深度研究和定时任务共用同一抽象框架。在 HotpotQA distractor A/B 实验中证明**跨家族审稿通过率 95% 显著高于同模型自评 0%**,数据驱动「不能让模型自评」的工程取舍。架构契合 2026 业界提出的 Loop Engineering 范式(Verify⊥Generate / Controller⊥Task / State⊥Process)。
+> **Verifier Loop 自闭环质量保障**:实现 Generate→Verify→Repair 三段式 Loop——独立 Verifier(支持跨家族 LLM-as-judge)按 6 维 Rubric 评分,智能 Repair 策略(Patch/章节重写)按问题类型自动选,Controller 状态外置 DB 可中断恢复;深度研究和定时任务共用同一抽象框架。生产配置通过企业 Gold Set 的漏检率、人工一致率、延迟与成本共同决定。
 
 ---
 
@@ -201,4 +197,4 @@ HomePage 在 Agent 简报后渲染(无数据时不显示)。
 | Prompt | `api/app/core/agent/loop/prompts/{critic_role,verify_research}.jinja2` |
 | 接入点 | `core/agent/research/engine.py` 末尾 + `tasks/agent_task.py:_check_loop_passed` |
 | 仪表盘 | `DashboardService.loop_health` + `web/src/components/dashboard/LoopHealthCard.tsx` |
-| HotpotQA A/B | `api/eval/benchmarks/hotpotqa/qa_verifier.py` + `runner.py --verifier {none,same,cross}` |
+| 企业评测 | `api/eval/benchmarks/` + 企业私有 Gold Set |

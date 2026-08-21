@@ -101,12 +101,14 @@ class KnowledgeBaseRepository:
         rows = (await self.session.execute(stmt)).scalars().all()
         return [str(r) for r in rows]
 
-    async def counts(self, user_id: uuid.UUID) -> dict[uuid.UUID, dict[str, int]]:
+    async def counts(self, user_id: uuid.UUID, kb_ids: list[uuid.UUID] | None = None) -> dict[uuid.UUID, dict[str, int]]:
         """统计每个知识库的文档数 / 图片数（实时，不冗余存储）。"""
         result: dict[uuid.UUID, dict[str, int]] = {}
+        doc_filter = Document.user_id == user_id if kb_ids is None else Document.kb_id.in_(kb_ids)
+        image_filter = Image.user_id == user_id if kb_ids is None else Image.kb_id.in_(kb_ids)
         doc_rows = await self.session.execute(
             select(Document.kb_id, func.count())
-            .where(Document.user_id == user_id, Document.kb_id.isnot(None))
+            .where(doc_filter, Document.kb_id.isnot(None))
             .group_by(Document.kb_id)
         )
         for kb_id, cnt in doc_rows.all():
@@ -114,7 +116,7 @@ class KnowledgeBaseRepository:
             result[kb_id]["doc_count"] = int(cnt)
         img_rows = await self.session.execute(
             select(Image.kb_id, func.count())
-            .where(Image.user_id == user_id, Image.kb_id.isnot(None))
+            .where(image_filter, Image.kb_id.isnot(None))
             .group_by(Image.kb_id)
         )
         for kb_id, cnt in img_rows.all():

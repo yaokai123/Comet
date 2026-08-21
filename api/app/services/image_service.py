@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.exceptions import BizError
 from app.core.logging import get_logger
+from app.core.rbac import RBACService
 from app.core.rag.es_store import delete_by_source
 from app.core.rag.search import hybrid_search
 from app.core.storage import build_file_key, get_storage
@@ -37,9 +38,7 @@ class ImageService:
     ) -> uuid.UUID:
         """确定图片归属库：指定了就校验归属，没指定落默认库。"""
         if kb_id:
-            kb = await self.kb_repo.get(user_id, kb_id)
-            if not kb:
-                raise BizError("知识库不存在", code=3040, status_code=404)
+            kb = await RBACService(self.session).require_kb(user_id, kb_id, "knowledge_base.write")
             return kb.id
         return (await self.kb_repo.ensure_default(user_id)).id
 
@@ -115,11 +114,8 @@ class ImageService:
         logger.info("对话图片入库: user=%s id=%s key=%s", user_id, img.id, file_key)
         return img
 
-    async def _get_or_404(self, user_id: uuid.UUID, image_id: uuid.UUID) -> Image:
-        img = await self.repo.get(user_id, image_id)
-        if not img:
-            raise BizError("图片不存在", code=3022, status_code=404)
-        return img
+    async def _get_or_404(self, user_id: uuid.UUID, image_id: uuid.UUID, permission: str = "image.read") -> Image:
+        return await RBACService(self.session).require_image(user_id, image_id, permission)
 
     async def list_images(
         self,
@@ -129,7 +125,10 @@ class ImageService:
         tag: str | None = None,
         kb_id: uuid.UUID | None = None,
     ) -> tuple[list[Image], int]:
-        return await self.repo.list_paged(user_id, page, page_size, tag, kb_id)
+        allowed = [uuid.UUID(value) for value in await RBACService(self.session).allowed_kb_ids(user_id, "image.read")]
+        if kb_id:
+            await RBACService(self.session).require_kb(user_id, kb_id, "knowledge_base.read")
+        return await self.repo.list_paged(user_id, page, page_size, tag, kb_id, allowed)
 
     async def get_detail(self, user_id: uuid.UUID, image_id: uuid.UUID) -> Image:
         return await self._get_or_404(user_id, image_id)
@@ -198,7 +197,7 @@ class ImageService:
             hit["citation_index"] = index
             try:
                 image_id = uuid.UUID(str(hit.get("source_id")))
-                image = await self.repo.get(user_id, image_id)
+                image = await RBACService(self.session).require_image(user_id, image_id, "image.read")
             except (TypeError, ValueError):
                 image = None
             hit["image_id"] = str(image.id) if image else None
@@ -209,8 +208,8 @@ class ImageService:
         return hits
 
     async def delete(self, user_id: uuid.UUID, image_id: uuid.UUID) -> None:
-        img = await self._get_or_404(user_id, image_id)
-        await delete_by_source(str(user_id), str(image_id))
+        img = await self._get_or_404(user_id, image_id, "image.manage")
+        await delete_by_source(str(img.user_id), str(image_id))
         try:
             await get_storage().delete(img.file_key)
         except Exception as e:
@@ -228,14 +227,12 @@ class ImageService:
         """把图片移动到另一个知识库，并同步回写 ES chunk 的 kb_id。"""
         from app.core.rag.es_store import update_kb_by_source
 
-        img = await self._get_or_404(user_id, image_id)
-        kb = await self.kb_repo.get(user_id, kb_id)
-        if not kb:
-            raise BizError("知识库不存在", code=3040, status_code=404)
+        img = await self._get_or_404(user_id, image_id, "image.write")
+        kb = await RBACService(self.session).require_kb(user_id, kb_id, "knowledge_base.write")
         img.kb_id = kb.id
         await self.repo.save(img)
         try:
-            await update_kb_by_source(str(user_id), str(image_id), str(kb.id))
+            await update_kb_by_source(str(img.user_id), str(image_id), str(kb.id))
         except Exception as e:
             logger.warning("移动图片回写 ES kb_id 失败（忽略）: %s", e)
         return img

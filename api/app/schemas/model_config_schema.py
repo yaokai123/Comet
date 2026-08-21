@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ModelTypeT = Literal["chat", "multimodal", "embedding", "rerank", "websearch", "asr", "verifier"]
 ProviderT = Literal[
-    "openai", "qwen", "doubao", "deepseek", "zhipu", "qianfan", "tavily"
+    "openai", "qwen", "doubao", "deepseek", "zhipu", "qianfan", "tavily", "local"
 ]
 
 
@@ -16,11 +16,11 @@ class ModelConfigCreate(BaseModel):
     provider: ProviderT
     name: str = Field(min_length=1, max_length=128)
     model_name: str = Field(min_length=1, max_length=128)
-    api_key: str = Field(min_length=1)
+    api_key: str = ""
     base_url: str = Field(min_length=1, max_length=255)
     capability: list[str] = Field(default_factory=list)
     is_default: bool = False
-    wire_api: Literal["chat_completions", "responses"] = "chat_completions"
+    wire_api: Literal["chat_completions", "responses", "tei"] = "chat_completions"
     reasoning_effort: str | None = Field(default=None, max_length=16)
     extra_headers: dict[str, str] = Field(default_factory=dict)
     store_responses: bool = False
@@ -33,7 +33,7 @@ class ModelConfigUpdate(BaseModel):
     api_key: str | None = None
     base_url: str | None = Field(default=None, max_length=255)
     capability: list[str] | None = None
-    wire_api: Literal["chat_completions", "responses"] | None = None
+    wire_api: Literal["chat_completions", "responses", "tei"] | None = None
     reasoning_effort: str | None = Field(default=None, max_length=16)
     extra_headers: dict[str, str] | None = None
     store_responses: bool | None = None

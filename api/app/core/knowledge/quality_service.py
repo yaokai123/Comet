@@ -19,6 +19,15 @@ async def persist_quality_issues(
     issues: list[QualityIssue],
 ) -> int:
     if not issues:
+        await session.execute(
+            update(KnowledgeQualityIssue)
+            .where(
+                KnowledgeQualityIssue.kb_id == kb_id,
+                KnowledgeQualityIssue.status == "open",
+            )
+            .values(status="resolved")
+        )
+        await session.flush()
         return 0
     values = [
         {

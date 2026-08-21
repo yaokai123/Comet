@@ -1,77 +1,93 @@
-"""文本分块：父子分块策略。
+"""Parent-child text chunking with bounded token windows and overlap."""
 
-父块（~1024 token）提供上下文，子块（~256 token，10% 重叠）用于向量召回。
-按中英文句子边界切分后合并到目标 token 数。
-"""
+from __future__ import annotations
+
 import re
 
 import tiktoken
 
 from app.core.logging import get_logger
 
-# 子块/父块目标 token 数
 CHILD_CHUNK_TOKENS = 256
 PARENT_CHUNK_TOKENS = 1024
 CHILD_OVERLAP_RATIO = 0.1
 
-# 句子分隔符（中英文）
-_SENT_SEP = re.compile(r"(?<=[。！？\.\!\?\n])")
-
+_SENT_SEP = re.compile(r"(?<=[。！？.!?\n])")
 logger = get_logger(__name__)
 
 try:
     _encoder = tiktoken.get_encoding("cl100k_base")
-except Exception as exc:  # First-run containers may not have network access.
+except Exception as exc:  # pragma: no cover - depends on local tokenizer cache
     _encoder = None
-    logger.warning("tiktoken 词表不可用，使用离线近似分词: %s", exc)
+    logger.warning("tiktoken vocabulary unavailable; using offline approximation: %s", exc)
 
 
 def count_tokens(text: str) -> int:
     if _encoder is not None:
         return len(_encoder.encode(text))
-    # One CJK character or punctuation is one unit; latin words are one unit.
     return len(re.findall(r"[\u4e00-\u9fff]|[A-Za-z0-9_]+|[^\s]", text))
 
 
 def _split_sentences(text: str) -> list[str]:
-    parts = [s.strip() for s in _SENT_SEP.split(text) if s and s.strip()]
-    return parts
+    return [part.strip() for part in _SENT_SEP.split(text) if part and part.strip()]
+
+
+def _join_sentences(sentences: list[str]) -> str:
+    # Visible boundaries are essential for flattened PDF table rows.
+    return "\n".join(sentences)
+
+
+def _split_oversized_text(
+    text: str, target_tokens: int, overlap_ratio: float
+) -> list[str]:
+    overlap = max(0, int(target_tokens * overlap_ratio))
+    stride = max(1, target_tokens - overlap)
+    if _encoder is not None:
+        token_ids = _encoder.encode(text)
+        return [
+            _encoder.decode(token_ids[start : start + target_tokens]).strip()
+            for start in range(0, len(token_ids), stride)
+            if token_ids[start : start + target_tokens]
+        ]
+    width = max(32, target_tokens * 3)
+    char_overlap = min(width - 1, overlap * 3)
+    char_stride = max(1, width - char_overlap)
+    return [text[start : start + width].strip() for start in range(0, len(text), char_stride)]
 
 
 def _merge_to_chunks(
     sentences: list[str], target_tokens: int, overlap_ratio: float = 0.0
 ) -> list[str]:
-    """把句子合并成不超过 target_tokens 的块，可带重叠。"""
     chunks: list[str] = []
-    cur: list[str] = []
-    cur_tokens = 0
-    for sent in sentences:
-        st = count_tokens(sent)
-        # 单句超长：直接成块
-        if st >= target_tokens:
-            if cur:
-                chunks.append("".join(cur))
-                cur, cur_tokens = [], 0
-            chunks.append(sent)
+    current: list[str] = []
+    for sentence in sentences:
+        sentence_tokens = count_tokens(sentence)
+        if sentence_tokens > target_tokens:
+            if current:
+                chunks.append(_join_sentences(current))
+                current = []
+            chunks.extend(
+                _split_oversized_text(sentence, target_tokens, overlap_ratio)
+            )
             continue
-        if cur_tokens + st > target_tokens and cur:
-            chunks.append("".join(cur))
-            # 重叠：保留尾部一部分句子
+        candidate = _join_sentences([*current, sentence])
+        if current and count_tokens(candidate) > target_tokens:
+            chunks.append(_join_sentences(current))
             if overlap_ratio > 0:
-                keep = max(1, int(len(cur) * overlap_ratio))
-                cur = cur[-keep:]
-                cur_tokens = sum(count_tokens(s) for s in cur)
+                keep = max(1, int(len(current) * overlap_ratio))
+                current = current[-keep:]
+                while current and count_tokens(_join_sentences([*current, sentence])) > target_tokens:
+                    current.pop(0)
             else:
-                cur, cur_tokens = [], 0
-        cur.append(sent)
-        cur_tokens += st
-    if cur:
-        chunks.append("".join(cur))
-    return chunks
+                current = []
+        current.append(sentence)
+    if current:
+        chunks.append(_join_sentences(current))
+    return [chunk for chunk in chunks if chunk]
 
 
 class ParentChunk:
-    """一个父块及其下的子块。"""
+    """A larger context chunk and the smaller retrieval chunks beneath it."""
 
     def __init__(self, content: str):
         self.content = content
@@ -79,18 +95,26 @@ class ParentChunk:
 
 
 def chunk_parent_child(text: str) -> list[ParentChunk]:
-    """父子分块：先切父块，再在每个父块内切子块。"""
     text = text.strip()
     if not text:
         return []
-    sentences = _split_sentences(text)
-    parent_contents = _merge_to_chunks(sentences, PARENT_CHUNK_TOKENS)
+    parent_contents = _merge_to_chunks(_split_sentences(text), PARENT_CHUNK_TOKENS)
     result: list[ParentChunk] = []
-    for pc in parent_contents:
-        parent = ParentChunk(pc)
-        child_sents = _split_sentences(pc)
+    for parent_content in parent_contents:
+        parent = ParentChunk(parent_content)
         parent.children = _merge_to_chunks(
-            child_sents, CHILD_CHUNK_TOKENS, CHILD_OVERLAP_RATIO
+            _split_sentences(parent_content),
+            CHILD_CHUNK_TOKENS,
+            CHILD_OVERLAP_RATIO,
         )
         result.append(parent)
     return result
+
+
+__all__ = [
+    "CHILD_CHUNK_TOKENS",
+    "PARENT_CHUNK_TOKENS",
+    "ParentChunk",
+    "chunk_parent_child",
+    "count_tokens",
+]

@@ -228,10 +228,22 @@ class LLMClient:
             },
         ) as sp:
             sp.set_payload("batch_size", len(texts))
-            data = await _post_with_retry(
-                f"{self.base_url}/embeddings",
-                headers=self._headers, json=payload, timeout=60,
-            )
+            try:
+                data = await _post_with_retry(
+                    f"{self.base_url}/embeddings",
+                    headers=self._headers, json=payload, timeout=60,
+                )
+            except Exception as exc:
+                if len(texts) == 1:
+                    raise
+                midpoint = len(texts) // 2
+                logger.warning(
+                    "embedding batch failed for %d texts; retrying in smaller batches: %r",
+                    len(texts), exc,
+                )
+                left = await self._embed_one_batch(texts[:midpoint], dims)
+                right = await self._embed_one_batch(texts[midpoint:], dims)
+                return [*left, *right]
             in_t, out_t, cached = _extract_usage(data)
             sp.set_tokens(input=in_t, output=out_t, cached=cached, model_name=self.model_name)
             # OpenAI 兼容：data.data[i].embedding，按 index 排序

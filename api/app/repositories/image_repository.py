@@ -40,15 +40,17 @@ class ImageRepository:
         page_size: int,
         tag: str | None = None,
         kb_id: uuid.UUID | None = None,
+        accessible_kb_ids: list[uuid.UUID] | None = None,
     ) -> tuple[list[Image], int]:
-        base = select(Image).where(Image.user_id == user_id)
+        base = (select(Image).where(Image.user_id == user_id) if accessible_kb_ids is None
+                else select(Image).where(Image.kb_id.in_(accessible_kb_ids)))
         if kb_id:
             base = base.where(Image.kb_id == kb_id)
         if tag:
             base = (
                 base.join(image_tags, Image.id == image_tags.c.image_id)
                 .join(Tag, Tag.id == image_tags.c.tag_id)
-                .where(Tag.user_id == user_id, Tag.name == tag)
+                .where(Tag.name == tag)
             )
         total = await self.session.scalar(
             select(func.count()).select_from(base.subquery())
@@ -65,7 +67,7 @@ class ImageRepository:
         self, user_id: uuid.UUID, kb_id: uuid.UUID
     ) -> list[Image]:
         """取某知识库下全部图片（删库级联清理用）。"""
-        stmt = select(Image).where(Image.user_id == user_id, Image.kb_id == kb_id)
+        stmt = select(Image).where(Image.kb_id == kb_id)
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def save(self, image: Image) -> Image:

@@ -363,7 +363,7 @@ function DocTab({ kbId }: { kbId: string }) {
             </Button>
           </div>
           <Dragger
-            accept=".pdf,.docx,.md,.markdown,.txt,.html,.htm"
+            accept=".pdf,.docx,.xlsx,.xlsm,.xls,.md,.markdown,.txt,.html,.htm"
             showUploadList={false}
             beforeUpload={onUpload}
             multiple

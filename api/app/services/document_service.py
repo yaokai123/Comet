@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BizError
 from app.core.logging import get_logger
+from app.core.rbac import RBACService
 from app.core.rag.es_store import delete_by_source
 from app.core.rag.parser import SUPPORTED_EXTS
 from app.core.rag.search import hybrid_search
@@ -48,9 +49,7 @@ class DocumentService:
     ) -> uuid.UUID:
         """确定文档归属库：指定了就校验归属，没指定落默认库。"""
         if kb_id:
-            kb = await self.kb_repo.get(user_id, kb_id)
-            if not kb:
-                raise BizError("知识库不存在", code=3040, status_code=404)
+            kb = await RBACService(self.session).require_kb(user_id, kb_id, "knowledge_base.write")
             return kb.id
         return (await self.kb_repo.ensure_default(user_id)).id
 
@@ -155,12 +154,9 @@ class DocumentService:
         return doc
 
     async def _get_or_404(
-        self, user_id: uuid.UUID, doc_id: uuid.UUID
+        self, user_id: uuid.UUID, doc_id: uuid.UUID, permission: str = "document.read"
     ) -> Document:
-        doc = await self.repo.get(user_id, doc_id)
-        if not doc:
-            raise BizError("文档不存在", code=3006, status_code=404)
-        return doc
+        return await RBACService(self.session).require_document(user_id, doc_id, permission)
 
     async def list_documents(
         self,
@@ -170,28 +166,36 @@ class DocumentService:
         tag: str | None = None,
         kb_id: uuid.UUID | None = None,
     ) -> tuple[list[Document], int]:
-        return await self.repo.list_paged(user_id, page, page_size, tag, kb_id)
+        allowed = [uuid.UUID(value) for value in await RBACService(self.session).allowed_kb_ids(user_id, "document.read")]
+        if kb_id:
+            await RBACService(self.session).require_kb(user_id, kb_id, "knowledge_base.read")
+        return await self.repo.list_paged(user_id, page, page_size, tag, kb_id, allowed)
 
     async def get_detail(self, user_id: uuid.UUID, doc_id: uuid.UUID) -> Document:
         return await self._get_or_404(user_id, doc_id)
 
     async def retry(self, user_id: uuid.UUID, doc_id: uuid.UUID) -> Document:
-        doc = await self._get_or_404(user_id, doc_id)
+        doc = await self._get_or_404(user_id, doc_id, "document.write")
         doc.generation += 1
         doc.status = DOC_STATUS_PENDING
         doc.progress = 0.0
         doc.error_msg = None
-        await self.repo.save(doc)
+        await self.repo.save(doc, commit=False)
         await self._dispatch_parse(doc_id)
+        # Keep the document generation transition and durable outbox row atomic.
+        # Otherwise a request can commit `pending` while silently rolling back the
+        # newly-added job when the request session closes.
+        await self.session.commit()
+        await self.session.refresh(doc)
         return doc
 
     async def delete(self, user_id: uuid.UUID, doc_id: uuid.UUID) -> None:
-        doc = await self._get_or_404(user_id, doc_id)
+        doc = await self._get_or_404(user_id, doc_id, "document.manage")
         # 先使所有已投递的 worker 过期，再做不可逆清理。
         doc.generation += 1
         await self.repo.save(doc)
         # 清 ES chunk + 存储文件 + PG 记录
-        await delete_by_source(str(user_id), str(doc_id))
+        await delete_by_source(str(doc.user_id), str(doc_id))
         try:
             await get_storage().delete(doc.file_key)
         except Exception as e:
@@ -221,14 +225,12 @@ class DocumentService:
         """把文档移动到另一个知识库，并同步回写 ES chunk 的 kb_id。"""
         from app.core.rag.es_store import update_kb_by_source
 
-        doc = await self._get_or_404(user_id, doc_id)
-        kb = await self.kb_repo.get(user_id, kb_id)
-        if not kb:
-            raise BizError("知识库不存在", code=3040, status_code=404)
+        doc = await self._get_or_404(user_id, doc_id, "document.write")
+        kb = await RBACService(self.session).require_kb(user_id, kb_id, "knowledge_base.write")
         doc.kb_id = kb.id
         await self.repo.save(doc)
         try:
-            await update_kb_by_source(str(user_id), str(doc_id), str(kb.id))
+            await update_kb_by_source(str(doc.user_id), str(doc_id), str(kb.id))
         except Exception as e:
             logger.warning("移动文档回写 ES kb_id 失败（忽略）: %s", e)
         return doc

@@ -15,6 +15,7 @@ export type Provider =
   | 'zhipu'
   | 'qianfan'
   | 'tavily'
+  | 'local'
 
 export interface ModelConfigItem {
   id: string
@@ -27,6 +28,7 @@ export interface ModelConfigItem {
   capability: string[]
   is_default: boolean
   created_at: string
+  wire_api: 'chat_completions' | 'responses' | 'tei'
 }
 
 export interface ModelConfigPayload {
@@ -38,6 +40,7 @@ export interface ModelConfigPayload {
   base_url: string
   capability: string[]
   is_default: boolean
+  wire_api?: 'chat_completions' | 'responses' | 'tei'
 }
 
 export const modelApi = {

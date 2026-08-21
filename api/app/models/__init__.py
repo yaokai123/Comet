@@ -24,6 +24,9 @@ from app.models.enterprise_knowledge_model import (
     WikiPage,
     WikiPageVersion,
 )
+from app.models.enterprise_rbac_model import (
+    KnowledgeRoot, Organization, OrganizationMembership, RBACAuditEvent, RBACRole, ResourceGrant,
+)
 from app.models.emotion_model import EmotionProfile, EmotionRecord
 from app.models.favorite_model import Favorite
 from app.models.group_member_model import GroupMember
@@ -73,6 +76,12 @@ __all__ = [
     "KnowledgeConnectorRecord",
     "KnowledgeQualityIssue",
     "KnowledgeSyncJob",
+    "KnowledgeRoot",
+    "Organization",
+    "OrganizationMembership",
+    "RBACRole",
+    "RBACAuditEvent",
+    "ResourceGrant",
     "LoopRun",
     "LoopIteration",
     "MCPServer",

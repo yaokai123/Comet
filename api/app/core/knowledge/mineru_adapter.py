@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import asdict
 from typing import Any
@@ -27,6 +28,10 @@ _KIND_MAP = {
     "code": BlockKind.CODE,
     "reference": BlockKind.REFERENCE,
 }
+
+_MINERU_MAX_RETRIES = 3
+_MINERU_RETRY_BACKOFF = 1.5
+_MINERU_RETRY_STATUS = {502, 503, 504}
 
 
 def _first(value: Any) -> str:
@@ -93,6 +98,8 @@ def content_list_to_ir(
         kind = _KIND_MAP.get(raw_type, BlockKind.TEXT)
         page = _page(item)
         content = _content(item, kind, page)
+        if not content and kind not in {BlockKind.IMAGE, BlockKind.CHART}:
+            continue
         level_value = item.get("text_level", item.get("level"))
         try:
             level = int(level_value) if level_value is not None else None
@@ -163,14 +170,41 @@ class MinerUClient:
 
     async def parse(self, file_name: str, content: bytes) -> tuple[list[dict[str, Any]], str | None]:
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        async with httpx.AsyncClient(timeout=settings.mineru_timeout_seconds) as client:
-            response = await client.post(
-                self.endpoint,
-                headers=headers,
-                files={"file": (file_name, content, "application/pdf")},
-            )
-            response.raise_for_status()
-            payload = response.json()
+        last_exc: Exception | None = None
+        # The configured timeout is the budget for the whole MinerU operation,
+        # not for every retry. Giving each attempt the full budget made the
+        # default three attempts take up to 3 * timeout and left documents in
+        # ``parsing`` beyond the ingest runner's deadline.
+        async with asyncio.timeout(settings.mineru_timeout_seconds):
+            async with httpx.AsyncClient(timeout=settings.mineru_timeout_seconds) as client:
+                for attempt in range(_MINERU_MAX_RETRIES):
+                    try:
+                        response = await client.post(
+                            self.endpoint,
+                            headers=headers,
+                            files={"file": (file_name, content, "application/pdf")},
+                        )
+                        if response.status_code in _MINERU_RETRY_STATUS:
+                            raise httpx.HTTPStatusError(
+                                f"MinerU transient status {response.status_code}",
+                                request=response.request,
+                                response=response,
+                            )
+                        response.raise_for_status()
+                        payload = response.json()
+                        break
+                    except httpx.HTTPStatusError as exc:
+                        if exc.response is None or exc.response.status_code not in _MINERU_RETRY_STATUS:
+                            raise
+                        last_exc = exc
+                    except httpx.ReadTimeout as exc:
+                        last_exc = exc
+                    except httpx.TransportError as exc:
+                        last_exc = exc
+                    if attempt < _MINERU_MAX_RETRIES - 1:
+                        await asyncio.sleep(_MINERU_RETRY_BACKOFF * (attempt + 1))
+                else:
+                    raise last_exc if last_exc else RuntimeError("MinerU request failed")
         data = payload.get("data", payload) if isinstance(payload, dict) else payload
         if isinstance(data, list):
             return data, response.headers.get("x-mineru-version")

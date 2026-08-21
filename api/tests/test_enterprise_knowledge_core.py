@@ -1,5 +1,6 @@
 import asyncio
 
+from app.core.rag.chunker import CHILD_CHUNK_TOKENS, chunk_parent_child, count_tokens
 from app.core.knowledge.adaptive_chunker import (
     AdaptiveChunker,
     ChunkStrategy,
@@ -38,6 +39,22 @@ def test_adaptive_chunker_uses_headings_and_preserves_structure():
     assert chunks[0].section_path == ("Architecture",)
     assert chunks[1].section_path == ("Governance",)
     assert all(chunk.block_ids for chunk in chunks)
+
+
+def test_parent_child_chunker_preserves_boundaries_and_bounds_long_rows():
+    long_row = " | ".join(f"financial-column-{index}" for index in range(500))
+    text = f"Revenue statement.\n{long_row}\nCurrent liabilities were reported."
+
+    children = [child for parent in chunk_parent_child(text) for child in parent.children]
+    short_children = [
+        child
+        for parent in chunk_parent_child("Revenue statement.\nCurrent liabilities were reported.")
+        for child in parent.children
+    ]
+
+    assert children
+    assert all(count_tokens(child) <= CHILD_CHUNK_TOKENS for child in children)
+    assert "\n" in short_children[0]
 
 
 def test_staged_rag_pipeline_is_ordered_replaceable_and_observable():

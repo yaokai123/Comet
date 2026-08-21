@@ -27,6 +27,9 @@ class KnowledgeBase(Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
     icon: Mapped[str | None] = mapped_column(String(32), nullable=True)  # emoji

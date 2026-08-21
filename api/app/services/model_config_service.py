@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BizError
 from app.core.llm.provider import test_connection
+from app.core.llm.resolver import _api_key
 from app.core.logging import get_logger
 from app.core.security import decrypt_secret, encrypt_secret, mask_secret
 from app.models.model_config_model import ModelConfig
@@ -35,13 +36,15 @@ class ModelConfigService:
     async def create(
         self, user_id: uuid.UUID, body: ModelConfigCreate
     ) -> ModelConfig:
+        if body.provider != "local" and not body.api_key:
+            raise BizError("non-local model configuration requires an API key", code=2002)
         config = ModelConfig(
             user_id=user_id,
             type=body.type,
             provider=body.provider,
             name=body.name,
             model_name=body.model_name,
-            api_key_encrypted=encrypt_secret(body.api_key),
+            api_key_encrypted=(encrypt_secret(body.api_key) if body.api_key else ""),
             base_url=body.base_url,
             capability=body.capability,
             is_default=body.is_default,
@@ -110,7 +113,7 @@ class ModelConfigService:
         self, user_id: uuid.UUID, config_id: uuid.UUID
     ) -> tuple[bool, str]:
         config = await self._get_or_404(user_id, config_id)
-        api_key = decrypt_secret(config.api_key_encrypted)
+        api_key = _api_key(config)
         # websearch 按 provider 测试（base_url 字段对联网搜索无意义，传 provider）
         first_arg = config.provider if config.type == "websearch" else config.base_url
         ok, msg = await test_connection(
@@ -149,7 +152,10 @@ class ModelConfigService:
             "provider": config.provider,
             "name": config.name,
             "model_name": config.model_name,
-            "api_key_masked": mask_secret(decrypt_secret(config.api_key_encrypted)),
+            "api_key_masked": (
+                mask_secret(decrypt_secret(config.api_key_encrypted))
+                if config.api_key_encrypted else ""
+            ),
             "base_url": config.base_url,
             "capability": config.capability,
             "is_default": config.is_default,
